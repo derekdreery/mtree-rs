@@ -1,6 +1,9 @@
 //! Stuff for parsing mtree files.
 use util::{FromHex, FromDec};
 use std::fmt;
+use std::borrow::Cow;
+
+use super::Device;
 
 /// An mtree file is a sequence of lines, each a semantic unit.
 #[derive(Debug)]
@@ -88,7 +91,7 @@ pub enum Keyword<'a> {
     /// the cksum(1) utility.
     Checksum(&'a [u8]),
     /// `device` The device number for *block* or *char* file types.
-    Device(Device<'a>),
+    DeviceRef(DeviceRef<'a>),
     /// `contents` The full pathname of a file that holds the contents of this file.
     Contents(&'a [u8]),
     /// `flags` The file flags as a symbolic name.
@@ -118,7 +121,7 @@ pub enum Keyword<'a> {
     /// `resdevice` The "resident" device number of the file, e.g. the ID of the
     /// device that contains the file. Its format is the same as the one for 
     /// `device`.
-    ResidentDevice(Device<'a>),
+    ResidentDeviceRef(DeviceRef<'a>),
     /// `rmd160|rmd160digest|ripemd160digest` The RIPEMD160 message digest of 
     /// the file.
     Rmd160([u8; 20]),
@@ -147,14 +150,14 @@ impl<'a> fmt::Debug for Keyword<'a> {
         match self {
             Keyword::Checksum(ref inner) => 
                 f.debug_tuple("Keyword::Checksum").field(inner).finish(),
-            Keyword::Device(ref inner) =>
-                f.debug_tuple("Keyword::Device").field(inner).finish(),
+            Keyword::DeviceRef(ref inner) =>
+                f.debug_tuple("Keyword::DeviceRef").field(inner).finish(),
             Keyword::Contents(ref inner) =>
                 f.debug_tuple("Keyword::Contents").field(inner).finish(),
             Keyword::Flags(ref inner) =>
                 f.debug_tuple("Keyword::Flags").field(inner).finish(),
             Keyword::Gid(inner) =>
-                f.debug_tuple("Keyword::Device").field(inner).finish(),
+                f.debug_tuple("Keyword::DeviceRef").field(inner).finish(),
             Keyword::Gname(ref inner) =>
                 f.debug_tuple("Keyword::Gname").field(inner).finish(),
             Keyword::Ignore =>
@@ -176,8 +179,8 @@ impl<'a> fmt::Debug for Keyword<'a> {
                 f.write_str("Keyword::NoChange"),
             Keyword::Optional =>
                 f.write_str("Keyword::Optional"),
-            Keyword::ResidentDevice(inner) =>
-                f.debug_tuple("Keyword::ResidentDevice").field(inner).finish(),
+            Keyword::ResidentDeviceRef(inner) =>
+                f.debug_tuple("Keyword::ResidentDeviceRef").field(inner).finish(),
             Keyword::Rmd160(inner) => {
                 f.write_str("Keyword::Md5(")?;
                 f.debug_list().entries(inner.iter()).finish()?;
@@ -224,7 +227,7 @@ impl<'a> Keyword<'a> {
         let key = iter.next()?;
         Some(match key {
             b"cksum" => Keyword::Checksum(iter.next()?),
-            b"device" => Keyword::Device(Device::from_bytes(iter.next()?)?),
+            b"device" => Keyword::DeviceRef(DeviceRef::from_bytes(iter.next()?)?),
             b"contents" => Keyword::Contents(iter.next()?),
             b"flags" => Keyword::Flags(iter.next()?),
             b"gid" => Keyword::Gid(u64::from_dec(iter.next()?)?),
@@ -239,7 +242,7 @@ impl<'a> Keyword<'a> {
             b"nochange" => Keyword::NoChange,
             b"optional" => Keyword::Optional,
             b"resdevice" => 
-                Keyword::ResidentDevice(Device::from_bytes(iter.next()?)?),
+                Keyword::ResidentDeviceRef(DeviceRef::from_bytes(iter.next()?)?),
             b"rmd160" | b"rmd160digest" | b"ripemd160digest" =>
                 Keyword::Rmd160(<[u8; 20]>::from_hex(iter.next()?)?),
             b"sha1" | b"sha1digest" => 
@@ -260,10 +263,10 @@ impl<'a> Keyword<'a> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct Device<'a> {
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct DeviceRef<'a> {
     /// The device format
-    format: Format<'a>,
+    format: Format,
     /// The device major identifier
     major: &'a [u8],
     /// The device minor identifier
@@ -272,19 +275,43 @@ pub struct Device<'a> {
     subunit: Option<&'a [u8]>,
 }
 
-impl<'a> Device<'a> {
-    fn from_bytes(input: &'a [u8]) -> Option<Device<'a>> {
+impl<'a> DeviceRef<'a> {
+    fn to_owned(&self) -> Device {
+        Device {
+            format: self.format,
+            major: self.major.to_owned(),
+            minor: self.minor.to_owned(),
+            subunit: self.subunit.map(|val| va.to_owned()),
+        }
+    }
+}
+
+impl<'a> DeviceRef<'a> {
+    fn into_owned(self) -> DeviceRef<'static> {
+        let DeviceRef { format, major, minor, subunit } = self;
+        DeviceRef {
+            format,
+            major: major.into_owned(),
+            minor: minor.into_owned(),
+            subunit: subunit.map(|val| val.into_owned()),
+        }
+    }
+}
+
+impl<'a> DeviceRef<'a> {
+    fn from_bytes(input: &'a [u8]) -> Option<DeviceRef<'a>> {
         let mut iter = input.splitn(4, |ch| *ch == b',');
-        let format = Format::from_bytes(iter.next()?);
-        let major = iter.next()?;
-        let minor = iter.next()?;
-        let subunit = iter.next(); // optional, so no '?'
-        Some(Device { format, major, minor, subunit })
+        let format = Format::from_bytes(iter.next()?)?;
+        let major = Cow::Borrowed(iter.next()?);
+        let minor = Cow::Borrowed(iter.next()?);
+        // optional, so no '?'
+        let subunit = iter.next().map(|val| Cow::Borrowed(val)); 
+        Some(DeviceRef { format, major, minor, subunit })
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Format<'a> {
+pub enum Format {
     Native,
     Bsd386,
     Bsd4,
@@ -301,12 +328,11 @@ pub enum Format<'a> {
     Svr3,
     Svr4,
     Ultrix,
-    Other(&'a [u8]),
 }
 
-impl<'a> Format<'a> {
-    fn from_bytes(bytes: &'a [u8]) -> Format<'a> {
-        match bytes {
+impl Format {
+    fn from_bytes(bytes: &[u8]) -> Option<Format> {
+        Some(match bytes {
             b"native" => Format::Native,
             b"386bsd" => Format::Bsd386,
             b"4bsd" => Format::Bsd4,
@@ -323,8 +349,8 @@ impl<'a> Format<'a> {
             b"svr3" => Format::Svr3,
             b"svr4" => Format::Svr4,
             b"ultrix" => Format::Ultrix,
-            ref other => Format::Other(other)
-        }
+            ref other => return None,
+        })
     }
 }
 
@@ -347,7 +373,6 @@ fn test_format_from_butes() {
         (&b"svr3"[..], Format::Svr3),
         (&b"svr4"[..], Format::Svr4),
         (&b"ultrix"[..], Format::Ultrix),
-        (&b"other"[..], Format::Other(b"other"))
     ] {
         assert_eq!(Format::from_bytes(&input[..]), res);
     }
@@ -355,8 +380,8 @@ fn test_format_from_butes() {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Type {
-    BlockDevice,
-    CharacterDevice,
+    BlockDeviceRef,
+    CharacterDeviceRef,
     Directory,
     Fifo,
     File,
@@ -367,8 +392,8 @@ pub enum Type {
 impl Type {
     fn from_bytes(input: &[u8]) -> Option<Type> {
         Some(match input {
-            b"block" => Type::BlockDevice,
-            b"char" => Type::CharacterDevice,
+            b"block" => Type::BlockDeviceRef,
+            b"char" => Type::CharacterDeviceRef,
             b"dir" => Type::Directory,
             b"fifo" => Type::Fifo,
             b"file" => Type::File,
@@ -382,8 +407,8 @@ impl Type {
 #[test]
 fn test_type_from_bytes() {
     for (input, res) in vec![
-        (&b"block"[..], Type::BlockDevice),
-        (&b"char"[..], Type::CharacterDevice),
+        (&b"block"[..], Type::BlockDeviceRef),
+        (&b"char"[..], Type::CharacterDeviceRef),
         (&b"dir"[..], Type::Directory),
         (&b"fifo"[..], Type::Fifo),
         (&b"file"[..], Type::File),
