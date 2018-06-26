@@ -1,36 +1,89 @@
 //! Stuff for parsing mtree files.
+use util::{FromHex, FromDec};
+use std::fmt;
 
 /// An mtree file is a sequence of lines, each a semantic unit.
-#[derive(Debug, PartialEq, Eq)]
-enum MTreeLine<'a> {
+#[derive(Debug)]
+pub enum MTreeLine<'a> {
     /// Blank lines are ignored.
     Blank,
     /// Lines starting with a '#' are ignored.
     Comment(&'a [u8]),
     /// Special commands (starting with '/') alter the behavior of later entries.
-    Special(Special),
+    Special(SpecialKind, Vec<Keyword<'a>>),
     /// If the first word does not contain a '/', it is a file in the current
     /// directory.
-    Relative(&'a [u8]),
+    Relative(&'a [u8], Vec<Keyword<'a>>),
     /// Change the current directory to the parent of the current directory.
     DotDot,
     /// If the first word does contain a '/', it is a file relative to the starting
     /// (not current) directory.
-    Full(&'a [u8]),
+    Full(&'a [u8], Vec<Keyword<'a>>),
+}
+
+impl<'a> MTreeLine<'a> {
+    pub fn from_bytes(input: &'a [u8]) -> Option<MTreeLine<'a>> {
+        let mut parts = input.split(|ch| *ch == b' ')
+            .filter(|word| ! word.is_empty());
+        // Blank
+        let first = match parts.next() {
+            Some(f) => f,
+            None => return Some(MTreeLine::Blank),
+        };
+        // Comment
+        if first[0] == b'#' {
+            return Some(MTreeLine::Comment(input));
+        }
+        // DotDot
+        if first == b".." {
+            return Some(MTreeLine::DotDot);
+        }
+        // the rest need params
+        let mut params = Vec::new();
+        for part in parts {
+            let keyword = Keyword::from_bytes(part);
+            debug_assert!(keyword.is_some(), 
+                          "could not parse bytes: {}",
+                          String::from_utf8_lossy(part));
+            if let Some(keyword) = keyword {
+                params.push(keyword);
+            }
+        }
+
+        // Special
+        if first[0] == b'/' {
+            let kind = SpecialKind::from_bytes(&first[1..])?;
+            Some(MTreeLine::Special(kind, params))
+        // Full
+        } else if first.contains(&b'/') {
+            Some(MTreeLine::Full(first, params))
+        } else {
+            Some(MTreeLine::Relative(first, params))
+        }
+    }
 }
 
 /// A command that alters the behavior of later commands.
-#[derive(Debug, PartialEq, Eq)]
-enum Special {
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SpecialKind {
     /// Set a default for future lines.
     Set,
     /// Unset a default for future lines.
     Unset,
 }
 
+impl SpecialKind {
+    fn from_bytes(input: &[u8]) -> Option<SpecialKind> {
+        Some(match input {
+            b"set" => SpecialKind::Set,
+            b"unset" => SpecialKind::Unset,
+            _ => return None,
+        })
+    }
+}
+
 /// Each entry may have one or more key word
-#[derive(Debug, PartialEq, Eq)]
-enum Keyword<'a> {
+pub enum Keyword<'a> {
     /// `cksum` The checksum of the file using the default algorithm specified by
     /// the cksum(1) utility.
     Checksum(&'a [u8]),
@@ -47,7 +100,7 @@ enum Keyword<'a> {
     /// `ignore` Ignore any file hierarchy below this line.
     Ignore,
     /// `inode` The inode number.
-    Inode(&'a [u8]),
+    Inode(u64),
     /// `link` The target of the symbolic link when type=link.
     Link(&'a [u8]),
     /// `md5|md5digest` The MD5 message digest of the file.
@@ -89,12 +142,87 @@ enum Keyword<'a> {
     Uname(&'a [u8]),
 }
 
+impl<'a> fmt::Debug for Keyword<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Keyword::Checksum(ref inner) => 
+                f.debug_tuple("Keyword::Checksum").field(inner).finish(),
+            Keyword::Device(ref inner) =>
+                f.debug_tuple("Keyword::Device").field(inner).finish(),
+            Keyword::Contents(ref inner) =>
+                f.debug_tuple("Keyword::Contents").field(inner).finish(),
+            Keyword::Flags(ref inner) =>
+                f.debug_tuple("Keyword::Flags").field(inner).finish(),
+            Keyword::Gid(inner) =>
+                f.debug_tuple("Keyword::Device").field(inner).finish(),
+            Keyword::Gname(ref inner) =>
+                f.debug_tuple("Keyword::Gname").field(inner).finish(),
+            Keyword::Ignore =>
+                f.write_str("Keyword::Ignore"),
+            Keyword::Inode(inner) =>
+                f.debug_tuple("Keyword::Inode").field(inner).finish(),
+            Keyword::Link(ref inner) =>
+                f.debug_tuple("Keyword::Link").field(inner).finish(),
+            Keyword::Md5(inner) => {
+                f.write_str("Keyword::Md5(")?;
+                f.debug_list().entries(inner.iter()).finish()?;
+                f.write_str(")")
+            }
+            Keyword::Mode(ref inner) =>
+                f.debug_tuple("Keyword::Mode").field(inner).finish(),
+            Keyword::NLink(inner) =>
+                f.debug_tuple("Keyword::NLink").field(inner).finish(),
+            Keyword::NoChange =>
+                f.write_str("Keyword::NoChange"),
+            Keyword::Optional =>
+                f.write_str("Keyword::Optional"),
+            Keyword::ResidentDevice(inner) =>
+                f.debug_tuple("Keyword::ResidentDevice").field(inner).finish(),
+            Keyword::Rmd160(inner) => {
+                f.write_str("Keyword::Md5(")?;
+                f.debug_list().entries(inner.iter()).finish()?;
+                f.write_str(")")
+            },
+            Keyword::Sha1(inner) => {
+                f.write_str("Keyword::Sha1(")?;
+                f.debug_list().entries(inner.iter()).finish()?;
+                f.write_str(")")
+            },
+            Keyword::Sha256(inner) => {
+                f.write_str("Keyword::Sha256(")?;
+                f.debug_list().entries(inner.iter()).finish()?;
+                f.write_str(")")
+            },
+            Keyword::Sha384(inner) => {
+                f.write_str("Keyword::Sha384(")?;
+                f.debug_list().entries(inner.iter()).finish()?;
+                f.write_str(")")
+            },
+            Keyword::Sha512(inner) => {
+                f.write_str("Keyword::Sha512(")?;
+                f.debug_list().entries(inner.iter()).finish()?;
+                f.write_str(")")
+            },
+            Keyword::Size(inner) =>
+                f.debug_tuple("Keyword::Size").field(inner).finish(),
+            Keyword::Time(ref inner) =>
+                f.debug_tuple("Keyword::Time").field(inner).finish(),
+            Keyword::Type(inner) =>
+                f.debug_tuple("Keyword::Type").field(inner).finish(),
+            Keyword::Uid(inner) =>
+                f.debug_tuple("Keyword::Uid").field(inner).finish(),
+            Keyword::Uname(ref inner) =>
+                f.debug_tuple("Keyword::Uname").field(inner).finish(),
+        }
+    }
+}
+
 impl<'a> Keyword<'a> {
     /// Parse a keyword with optional value.
     fn from_bytes(input: &'a [u8]) -> Option<Keyword<'a>> {
         let mut iter = input.splitn(2, |ch| *ch == b'=');
         let key = iter.next()?;
-        Ok(match key {
+        Some(match key {
             b"cksum" => Keyword::Checksum(iter.next()?),
             b"device" => Keyword::Device(Device::from_bytes(iter.next()?)?),
             b"contents" => Keyword::Contents(iter.next()?),
@@ -102,32 +230,38 @@ impl<'a> Keyword<'a> {
             b"gid" => Keyword::Gid(u64::from_dec(iter.next()?)?),
             b"gname" => Keyword::Gname(iter.next()?),
             b"ignore" => Keyword::Ignore,
-            b"inode" => Keyword::Inode(u64::from_dic(iter.next()?)?),
+            b"inode" => Keyword::Inode(u64::from_dec(iter.next()?)?),
             b"link" => Keyword::Link(iter.next()?),
-            b"md5" | b"md5digest" => Keyword::Md5([u8; 16]),
-            b"mode" => Keyword::Mode(&'a [u8]),
-            b"nlink" => Keyword::NLink(u64),
+            b"md5" | b"md5digest" 
+                => Keyword::Md5(<[u8; 16]>::from_hex(iter.next()?)?),
+            b"mode" => Keyword::Mode(iter.next()?),
+            b"nlink" => Keyword::NLink(u64::from_dec(iter.next()?)?),
             b"nochange" => Keyword::NoChange,
             b"optional" => Keyword::Optional,
-            b"resdevice" => Keyword::ResidentDevice(Device<'a>),
-            b"rmd160" | b"rmd160digest" | b"ripemd160digest" => {
-                Keyword::Rmd160([u8; 20])
-            },
-            b"sha1" | b"sha1digest" => Keyword::Sha1([u8; 20]),
-            b"sha256" | b"sha256digest" => Keyword::Sha256([u8; 32]),
-            b"sha384" | b"sha384digest" => Keyword::Sha384([u8; 48]),
-            b"sha512" | b"sha512digest" => Keyword::Sha512([u8; 64]),
-            b"size" => Keyword::Size(u64),
-            b"time" => Keyword::Time(&'a [u8]),
-            b"type" => Keyword::Type(Type),
-            b"uid" => Keyword::Uid(u64::from_dec_bytes(input)),
-            b"uname" => Keyword::Uname(u64::from_dec_bytes(input)),
+            b"resdevice" => 
+                Keyword::ResidentDevice(Device::from_bytes(iter.next()?)?),
+            b"rmd160" | b"rmd160digest" | b"ripemd160digest" =>
+                Keyword::Rmd160(<[u8; 20]>::from_hex(iter.next()?)?),
+            b"sha1" | b"sha1digest" => 
+            Keyword::Sha1(<[u8; 20]>::from_hex(iter.next()?)?),
+            b"sha256" | b"sha256digest" => 
+                Keyword::Sha256(<[u8; 32]>::from_hex(iter.next()?)?),
+            b"sha384" | b"sha384digest" => 
+                Keyword::Sha384(<[u8; 48]>::from_hex(iter.next()?)?),
+            b"sha512" | b"sha512digest" => 
+                Keyword::Sha512(<[u8; 64]>::from_hex(iter.next()?)?),
+            b"size" => Keyword::Size(u64::from_dec(iter.next()?)?),
+            b"time" => Keyword::Time(iter.next()?),
+            b"type" => Keyword::Type(Type::from_bytes(iter.next()?)?),
+            b"uid" => Keyword::Uid(u64::from_dec(iter.next()?)?),
+            b"uname" => Keyword::Uname(iter.next()?),
+            _ => return None,
         })
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct Device<'a> {
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct Device<'a> {
     /// The device format
     format: Format<'a>,
     /// The device major identifier
@@ -149,8 +283,8 @@ impl<'a> Device<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum Format<'a> {
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Format<'a> {
     Native,
     Bsd386,
     Bsd4,
@@ -220,7 +354,7 @@ fn test_format_from_butes() {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Type {
+pub enum Type {
     BlockDevice,
     CharacterDevice,
     Directory,
