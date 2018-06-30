@@ -1,7 +1,6 @@
 //! Stuff for parsing mtree files.
 use util::{FromHex, FromDec};
 use std::fmt;
-use std::borrow::Cow;
 
 use super::Device;
 
@@ -25,30 +24,30 @@ pub enum MTreeLine<'a> {
 }
 
 impl<'a> MTreeLine<'a> {
-    pub fn from_bytes(input: &'a [u8]) -> Option<MTreeLine<'a>> {
+    pub fn from_bytes(input: &'a [u8]) -> ParserResult<MTreeLine<'a>> {
         let mut parts = input.split(|ch| *ch == b' ')
             .filter(|word| ! word.is_empty());
         // Blank
         let first = match parts.next() {
             Some(f) => f,
-            None => return Some(MTreeLine::Blank),
+            None => return Ok(MTreeLine::Blank),
         };
         // Comment
         if first[0] == b'#' {
-            return Some(MTreeLine::Comment(input));
+            return Ok(MTreeLine::Comment(input));
         }
         // DotDot
         if first == b".." {
-            return Some(MTreeLine::DotDot);
+            return Ok(MTreeLine::DotDot);
         }
         // the rest need params
         let mut params = Vec::new();
         for part in parts {
             let keyword = Keyword::from_bytes(part);
-            debug_assert!(keyword.is_some(), 
+            debug_assert!(keyword.is_ok(),
                           "could not parse bytes: {}",
                           String::from_utf8_lossy(part));
-            if let Some(keyword) = keyword {
+            if let Ok(keyword) = keyword {
                 params.push(keyword);
             }
         }
@@ -56,12 +55,12 @@ impl<'a> MTreeLine<'a> {
         // Special
         if first[0] == b'/' {
             let kind = SpecialKind::from_bytes(&first[1..])?;
-            Some(MTreeLine::Special(kind, params))
+            Ok(MTreeLine::Special(kind, params))
         // Full
         } else if first.contains(&b'/') {
-            Some(MTreeLine::Full(first, params))
+            Ok(MTreeLine::Full(first, params))
         } else {
-            Some(MTreeLine::Relative(first, params))
+            Ok(MTreeLine::Relative(first, params))
         }
     }
 }
@@ -76,11 +75,12 @@ pub enum SpecialKind {
 }
 
 impl SpecialKind {
-    fn from_bytes(input: &[u8]) -> Option<SpecialKind> {
-        Some(match input {
+    fn from_bytes(input: &[u8]) -> ParserResult<SpecialKind> {
+        Ok(match input {
             b"set" => SpecialKind::Set,
             b"unset" => SpecialKind::Unset,
-            _ => return None,
+            _ => return Err(format!(r#""{}" is not a special command"#,
+                                    String::from_utf8_lossy(input)).into()),
         })
     }
 }
@@ -89,7 +89,9 @@ impl SpecialKind {
 pub enum Keyword<'a> {
     /// `cksum` The checksum of the file using the default algorithm specified by
     /// the cksum(1) utility.
-    Checksum(&'a [u8]),
+    // I'm pretty sure u32 is big enough, but I'm using u64 because I'm not sure this is
+    // guaranteed.
+    Checksum(u64),
     /// `device` The device number for *block* or *char* file types.
     DeviceRef(DeviceRef<'a>),
     /// `contents` The full pathname of a file that holds the contents of this file.
@@ -112,17 +114,17 @@ pub enum Keyword<'a> {
     Mode(&'a [u8]),
     /// `nlink` The number of hard links the file is expected to have.
     NLink(u64),
-    /// `nochange` Make sure this file or directory exists but otherwise ignore 
+    /// `nochange` Make sure this file or directory exists but otherwise ignore
     /// all attributes.
     NoChange,
-    /// `optional` The file is optional; do not complain about the file if it is 
+    /// `optional` The file is optional; do not complain about the file if it is
     /// not in the file hierarchy.
     Optional,
     /// `resdevice` The "resident" device number of the file, e.g. the ID of the
-    /// device that contains the file. Its format is the same as the one for 
+    /// device that contains the file. Its format is the same as the one for
     /// `device`.
     ResidentDeviceRef(DeviceRef<'a>),
-    /// `rmd160|rmd160digest|ripemd160digest` The RIPEMD160 message digest of 
+    /// `rmd160|rmd160digest|ripemd160digest` The RIPEMD160 message digest of
     /// the file.
     Rmd160([u8; 20]),
     /// `sha1|sha1digest` The FIPS 160-1 ("SHA-1") message digest of the file.
@@ -148,7 +150,7 @@ pub enum Keyword<'a> {
 impl<'a> fmt::Debug for Keyword<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Keyword::Checksum(ref inner) => 
+            Keyword::Checksum(ref inner) =>
                 f.debug_tuple("Keyword::Checksum").field(inner).finish(),
             Keyword::DeviceRef(ref inner) =>
                 f.debug_tuple("Keyword::DeviceRef").field(inner).finish(),
@@ -222,43 +224,52 @@ impl<'a> fmt::Debug for Keyword<'a> {
 
 impl<'a> Keyword<'a> {
     /// Parse a keyword with optional value.
-    fn from_bytes(input: &'a [u8]) -> Option<Keyword<'a>> {
+    fn from_bytes(input: &'a [u8]) -> ParserResult<Keyword<'a>> {
+        fn next<'a>(field: &'static str, val: Option<&'a [u8]>)
+            -> ParserResult<&'a [u8]>
+        {
+            val.ok_or_else(|| format!(r#""{}" requires a parameter, none found"#, field).into())
+        }
         let mut iter = input.splitn(2, |ch| *ch == b'=');
-        let key = iter.next()?;
-        Some(match key {
-            b"cksum" => Keyword::Checksum(iter.next()?),
-            b"device" => Keyword::DeviceRef(DeviceRef::from_bytes(iter.next()?)?),
-            b"contents" => Keyword::Contents(iter.next()?),
-            b"flags" => Keyword::Flags(iter.next()?),
-            b"gid" => Keyword::Gid(u64::from_dec(iter.next()?)?),
-            b"gname" => Keyword::Gname(iter.next()?),
+        let key = iter.next().unwrap(); // cannot fail
+        Ok(match key {
+            b"cksum" => Keyword::Checksum(u64::from_dec(next("cksum", iter.next())?)?),
+            b"device" => Keyword::DeviceRef(DeviceRef::from_bytes(next("devices", iter.next())?)?),
+            b"contents" => Keyword::Contents(next("contents", iter.next())?),
+            b"flags" => Keyword::Flags(next("flags", iter.next())?),
+            b"gid" => Keyword::Gid(u64::from_dec(next("gid", iter.next())?)?),
+            b"gname" => Keyword::Gname(next("gname", iter.next())?),
             b"ignore" => Keyword::Ignore,
-            b"inode" => Keyword::Inode(u64::from_dec(iter.next()?)?),
-            b"link" => Keyword::Link(iter.next()?),
-            b"md5" | b"md5digest" 
-                => Keyword::Md5(<[u8; 16]>::from_hex(iter.next()?)?),
-            b"mode" => Keyword::Mode(iter.next()?),
-            b"nlink" => Keyword::NLink(u64::from_dec(iter.next()?)?),
+            b"inode" => Keyword::Inode(u64::from_dec(next("inode", iter.next())?)?),
+            b"link" => Keyword::Link(next("link", iter.next())?),
+            b"md5" | b"md5digest"
+                => Keyword::Md5(<[u8; 16]>::from_hex(next("md5|md5digest", iter.next())?)?),
+            b"mode" => Keyword::Mode(next("mode", iter.next())?),
+            b"nlink" => Keyword::NLink(u64::from_dec(next("nlink", iter.next())?)?),
             b"nochange" => Keyword::NoChange,
             b"optional" => Keyword::Optional,
-            b"resdevice" => 
-                Keyword::ResidentDeviceRef(DeviceRef::from_bytes(iter.next()?)?),
+            b"resdevice" =>
+                Keyword::ResidentDeviceRef(DeviceRef::from_bytes(next("resdevice", iter.next())?)?),
             b"rmd160" | b"rmd160digest" | b"ripemd160digest" =>
-                Keyword::Rmd160(<[u8; 20]>::from_hex(iter.next()?)?),
-            b"sha1" | b"sha1digest" => 
-            Keyword::Sha1(<[u8; 20]>::from_hex(iter.next()?)?),
-            b"sha256" | b"sha256digest" => 
-                Keyword::Sha256(<[u8; 32]>::from_hex(iter.next()?)?),
-            b"sha384" | b"sha384digest" => 
-                Keyword::Sha384(<[u8; 48]>::from_hex(iter.next()?)?),
-            b"sha512" | b"sha512digest" => 
-                Keyword::Sha512(<[u8; 64]>::from_hex(iter.next()?)?),
-            b"size" => Keyword::Size(u64::from_dec(iter.next()?)?),
-            b"time" => Keyword::Time(iter.next()?),
-            b"type" => Keyword::Type(Type::from_bytes(iter.next()?)?),
-            b"uid" => Keyword::Uid(u64::from_dec(iter.next()?)?),
-            b"uname" => Keyword::Uname(iter.next()?),
-            _ => return None,
+                Keyword::Rmd160(<[u8; 20]>::from_hex(
+                        next("rmd160|rmd160digest|ripemd160digest", iter.next())?)?),
+            b"sha1" | b"sha1digest" =>
+                Keyword::Sha1(<[u8; 20]>::from_hex(next("sha1|sha1digest", iter.next())?)?),
+            b"sha256" | b"sha256digest" =>
+                Keyword::Sha256(<[u8; 32]>::from_hex(next("sha256|sha256digest", iter.next())?)?),
+            b"sha384" | b"sha384digest" =>
+                Keyword::Sha384(<[u8; 48]>::from_hex(next("sha384|sha384digest", iter.next())?)?),
+            b"sha512" | b"sha512digest" =>
+                Keyword::Sha512(<[u8; 64]>::from_hex(next("sha512|sha512digest", iter.next())?)?),
+            b"size" => Keyword::Size(u64::from_dec(next("size", iter.next())?)?),
+            b"time" => Keyword::Time(next("time", iter.next())?),
+            b"type" => Keyword::Type(Type::from_bytes(next("type", iter.next())?)?),
+            b"uid" => Keyword::Uid(u64::from_dec(next("uid", iter.next())?)?),
+            b"uname" => Keyword::Uname(next("uname", iter.next())?),
+            other => return Err(format!(r#""{}" is not a valid parameter key (in "{}")"#,
+                                        String::from_utf8_lossy(other),
+                                        String::from_utf8_lossy(input)
+                                       ).into())
         })
     }
 }
@@ -276,37 +287,32 @@ pub struct DeviceRef<'a> {
 }
 
 impl<'a> DeviceRef<'a> {
-    fn to_owned(&self) -> Device {
+    /// Take ownership of the underlying data by copying
+    pub fn to_device(&self) -> Device {
         Device {
             format: self.format,
             major: self.major.to_owned(),
             minor: self.minor.to_owned(),
-            subunit: self.subunit.map(|val| va.to_owned()),
+            subunit: self.subunit.map(|val| val.to_owned()),
         }
     }
-}
 
-impl<'a> DeviceRef<'a> {
-    fn into_owned(self) -> DeviceRef<'static> {
-        let DeviceRef { format, major, minor, subunit } = self;
-        DeviceRef {
-            format,
-            major: major.into_owned(),
-            minor: minor.into_owned(),
-            subunit: subunit.map(|val| val.into_owned()),
-        }
-    }
-}
-
-impl<'a> DeviceRef<'a> {
-    fn from_bytes(input: &'a [u8]) -> Option<DeviceRef<'a>> {
+    fn from_bytes(input: &'a [u8]) -> ParserResult<DeviceRef<'a>> {
         let mut iter = input.splitn(4, |ch| *ch == b',');
-        let format = Format::from_bytes(iter.next()?)?;
-        let major = Cow::Borrowed(iter.next()?);
-        let minor = Cow::Borrowed(iter.next()?);
+        let format = Format::from_bytes(iter.next().ok_or_else(|| {
+            format!(r#"could not read format from device "{}""#, String::from_utf8_lossy(input))
+        })?)?;
+        let major = iter.next().ok_or_else(|| {
+            format!(r#"could not read major field from device "{}""#,
+                    String::from_utf8_lossy(input))
+        })?;
+        let minor = iter.next().ok_or_else(|| {
+            format!(r#"could not read minor field from device "{}""#,
+                    String::from_utf8_lossy(input))
+        })?;
         // optional, so no '?'
-        let subunit = iter.next().map(|val| Cow::Borrowed(val)); 
-        Some(DeviceRef { format, major, minor, subunit })
+        let subunit = iter.next();
+        Ok(DeviceRef { format, major, minor, subunit })
     }
 }
 
@@ -331,8 +337,8 @@ pub enum Format {
 }
 
 impl Format {
-    fn from_bytes(bytes: &[u8]) -> Option<Format> {
-        Some(match bytes {
+    fn from_bytes(bytes: &[u8]) -> ParserResult<Format> {
+        Ok(match bytes {
             b"native" => Format::Native,
             b"386bsd" => Format::Bsd386,
             b"4bsd" => Format::Bsd4,
@@ -349,7 +355,8 @@ impl Format {
             b"svr3" => Format::Svr3,
             b"svr4" => Format::Svr4,
             b"ultrix" => Format::Ultrix,
-            ref other => return None,
+            ref other => return Err(format!(r#""{}" is not a valid format"#,
+                                            String::from_utf8_lossy(other)).into()),
         })
     }
 }
@@ -374,14 +381,14 @@ fn test_format_from_butes() {
         (&b"svr4"[..], Format::Svr4),
         (&b"ultrix"[..], Format::Ultrix),
     ] {
-        assert_eq!(Format::from_bytes(&input[..]), res);
+        assert_eq!(Format::from_bytes(&input[..]), Ok(res));
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {
-    BlockDeviceRef,
-    CharacterDeviceRef,
+    BlockDevice,
+    CharacterDevice,
     Directory,
     Fifo,
     File,
@@ -390,16 +397,17 @@ pub enum Type {
 }
 
 impl Type {
-    fn from_bytes(input: &[u8]) -> Option<Type> {
-        Some(match input {
-            b"block" => Type::BlockDeviceRef,
-            b"char" => Type::CharacterDeviceRef,
+    fn from_bytes(input: &[u8]) -> ParserResult<Type> {
+        Ok(match input {
+            b"block" => Type::BlockDevice,
+            b"char" => Type::CharacterDevice,
             b"dir" => Type::Directory,
             b"fifo" => Type::Fifo,
             b"file" => Type::File,
             b"link" => Type::SymbolicLink,
             b"socket" => Type::Socket,
-            _ => return None,
+            _ => return Err(format!(r#""{}" is not a valid file type"#,
+                                    String::from_utf8_lossy(input)).into()),
         })
     }
 }
@@ -407,15 +415,29 @@ impl Type {
 #[test]
 fn test_type_from_bytes() {
     for (input, res) in vec![
-        (&b"block"[..], Type::BlockDeviceRef),
-        (&b"char"[..], Type::CharacterDeviceRef),
+        (&b"block"[..], Type::BlockDevice),
+        (&b"char"[..], Type::CharacterDevice),
         (&b"dir"[..], Type::Directory),
         (&b"fifo"[..], Type::Fifo),
         (&b"file"[..], Type::File),
         (&b"link"[..], Type::SymbolicLink),
         (&b"socket"[..], Type::Socket),
     ] {
-        assert_eq!(Type::from_bytes(&input[..]), Some(res));
+        assert_eq!(Type::from_bytes(&input[..]), Ok(res));
     }
-    assert!(Type::from_bytes(&b"other"[..]).is_none());
+    assert!(Type::from_bytes(&b"other"[..]).is_err());
 }
+
+pub(crate) type ParserResult<T> = Result<T, ParserError>;
+
+#[derive(Debug, Eq, PartialEq, Fail)]
+#[fail(display = "{}", _0)]
+pub struct ParserError(String);
+
+impl From<String> for ParserError {
+    fn from(s: String) -> ParserError {
+        ParserError(s)
+    }
+}
+
+
