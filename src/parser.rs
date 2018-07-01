@@ -1,6 +1,6 @@
 //! Stuff for parsing mtree files.
-use util::{FromHex, FromDec};
-use std::fmt;
+use util::{FromHex, FromDec, parse_time, Array48, Array64};
+use std::time::Duration;
 
 use super::Device;
 
@@ -86,6 +86,7 @@ impl SpecialKind {
 }
 
 /// Each entry may have one or more key word
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Keyword<'a> {
     /// `cksum` The checksum of the file using the default algorithm specified by
     /// the cksum(1) utility.
@@ -97,6 +98,8 @@ pub enum Keyword<'a> {
     /// `contents` The full pathname of a file that holds the contents of this file.
     Contents(&'a [u8]),
     /// `flags` The file flags as a symbolic name.
+    ///
+    /// I think this is bsd-specific.
     Flags(&'a [u8]),
     /// `gid` The file group as a numeric value.
     Gid(u64),
@@ -109,7 +112,7 @@ pub enum Keyword<'a> {
     /// `link` The target of the symbolic link when type=link.
     Link(&'a [u8]),
     /// `md5|md5digest` The MD5 message digest of the file.
-    Md5([u8; 16]),
+    Md5(u128),
     /// `mode` The current file's permissions as a numeric (octal) or symbolic value.
     Mode(&'a [u8]),
     /// `nlink` The number of hard links the file is expected to have.
@@ -132,13 +135,15 @@ pub enum Keyword<'a> {
     /// `sha256|sha256digest` The FIPS 180-2 ("SHA-256") message digest of the file.
     Sha256([u8; 32]),
     /// `sha384|sha384digest` The FIPS 180-2 ("SHA-384") message digest of the file.
-    Sha384([u8; 48]),
+    Sha384(Array48<u8>),
     /// `sha512|sha512digest` The FIPS 180-2 ("SHA-512") message digest of the file.
-    Sha512([u8; 64]),
+    Sha512(Array64<u8>),
     /// `size` The size, in bytes, of the file.
     Size(u64),
-    /// `time` The last modification time of the file
-    Time(&'a [u8]),
+    /// `time` The last modification time of the file, as a duration since the unix epoch.
+    // The last modification time of the file, in seconds and nanoseconds. The value should
+    // include a period character and exactly nine digits after the period.
+    Time(Duration),
     /// `type` The type of the file.
     Type(Type),
     /// The file owner as a numeric value.
@@ -146,82 +151,6 @@ pub enum Keyword<'a> {
     /// The file owner as a symbolic name.
     Uname(&'a [u8]),
 }
-
-impl<'a> fmt::Debug for Keyword<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Keyword::Checksum(ref inner) =>
-                f.debug_tuple("Keyword::Checksum").field(inner).finish(),
-            Keyword::DeviceRef(ref inner) =>
-                f.debug_tuple("Keyword::DeviceRef").field(inner).finish(),
-            Keyword::Contents(ref inner) =>
-                f.debug_tuple("Keyword::Contents").field(inner).finish(),
-            Keyword::Flags(ref inner) =>
-                f.debug_tuple("Keyword::Flags").field(inner).finish(),
-            Keyword::Gid(inner) =>
-                f.debug_tuple("Keyword::DeviceRef").field(inner).finish(),
-            Keyword::Gname(ref inner) =>
-                f.debug_tuple("Keyword::Gname").field(inner).finish(),
-            Keyword::Ignore =>
-                f.write_str("Keyword::Ignore"),
-            Keyword::Inode(inner) =>
-                f.debug_tuple("Keyword::Inode").field(inner).finish(),
-            Keyword::Link(ref inner) =>
-                f.debug_tuple("Keyword::Link").field(inner).finish(),
-            Keyword::Md5(inner) => {
-                f.write_str("Keyword::Md5(")?;
-                f.debug_list().entries(inner.iter()).finish()?;
-                f.write_str(")")
-            }
-            Keyword::Mode(ref inner) =>
-                f.debug_tuple("Keyword::Mode").field(inner).finish(),
-            Keyword::NLink(inner) =>
-                f.debug_tuple("Keyword::NLink").field(inner).finish(),
-            Keyword::NoChange =>
-                f.write_str("Keyword::NoChange"),
-            Keyword::Optional =>
-                f.write_str("Keyword::Optional"),
-            Keyword::ResidentDeviceRef(inner) =>
-                f.debug_tuple("Keyword::ResidentDeviceRef").field(inner).finish(),
-            Keyword::Rmd160(inner) => {
-                f.write_str("Keyword::Md5(")?;
-                f.debug_list().entries(inner.iter()).finish()?;
-                f.write_str(")")
-            },
-            Keyword::Sha1(inner) => {
-                f.write_str("Keyword::Sha1(")?;
-                f.debug_list().entries(inner.iter()).finish()?;
-                f.write_str(")")
-            },
-            Keyword::Sha256(inner) => {
-                f.write_str("Keyword::Sha256(")?;
-                f.debug_list().entries(inner.iter()).finish()?;
-                f.write_str(")")
-            },
-            Keyword::Sha384(inner) => {
-                f.write_str("Keyword::Sha384(")?;
-                f.debug_list().entries(inner.iter()).finish()?;
-                f.write_str(")")
-            },
-            Keyword::Sha512(inner) => {
-                f.write_str("Keyword::Sha512(")?;
-                f.debug_list().entries(inner.iter()).finish()?;
-                f.write_str(")")
-            },
-            Keyword::Size(inner) =>
-                f.debug_tuple("Keyword::Size").field(inner).finish(),
-            Keyword::Time(ref inner) =>
-                f.debug_tuple("Keyword::Time").field(inner).finish(),
-            Keyword::Type(inner) =>
-                f.debug_tuple("Keyword::Type").field(inner).finish(),
-            Keyword::Uid(inner) =>
-                f.debug_tuple("Keyword::Uid").field(inner).finish(),
-            Keyword::Uname(ref inner) =>
-                f.debug_tuple("Keyword::Uname").field(inner).finish(),
-        }
-    }
-}
-
 impl<'a> Keyword<'a> {
     /// Parse a keyword with optional value.
     fn from_bytes(input: &'a [u8]) -> ParserResult<Keyword<'a>> {
@@ -243,7 +172,7 @@ impl<'a> Keyword<'a> {
             b"inode" => Keyword::Inode(u64::from_dec(next("inode", iter.next())?)?),
             b"link" => Keyword::Link(next("link", iter.next())?),
             b"md5" | b"md5digest"
-                => Keyword::Md5(<[u8; 16]>::from_hex(next("md5|md5digest", iter.next())?)?),
+                => Keyword::Md5(u128::from_hex(next("md5|md5digest", iter.next())?)?),
             b"mode" => Keyword::Mode(next("mode", iter.next())?),
             b"nlink" => Keyword::NLink(u64::from_dec(next("nlink", iter.next())?)?),
             b"nochange" => Keyword::NoChange,
@@ -258,11 +187,11 @@ impl<'a> Keyword<'a> {
             b"sha256" | b"sha256digest" =>
                 Keyword::Sha256(<[u8; 32]>::from_hex(next("sha256|sha256digest", iter.next())?)?),
             b"sha384" | b"sha384digest" =>
-                Keyword::Sha384(<[u8; 48]>::from_hex(next("sha384|sha384digest", iter.next())?)?),
+                Keyword::Sha384(<Array48<u8>>::from_hex(next("sha384|sha384digest", iter.next())?)?),
             b"sha512" | b"sha512digest" =>
-                Keyword::Sha512(<[u8; 64]>::from_hex(next("sha512|sha512digest", iter.next())?)?),
+                Keyword::Sha512(<Array64<u8>>::from_hex(next("sha512|sha512digest", iter.next())?)?),
             b"size" => Keyword::Size(u64::from_dec(next("size", iter.next())?)?),
-            b"time" => Keyword::Time(next("time", iter.next())?),
+            b"time" => Keyword::Time(parse_time(next("time", iter.next())?)?),
             b"type" => Keyword::Type(Type::from_bytes(next("type", iter.next())?)?),
             b"uid" => Keyword::Uid(u64::from_dec(next("uid", iter.next())?)?),
             b"uname" => Keyword::Uname(next("uname", iter.next())?),
@@ -439,5 +368,3 @@ impl From<String> for ParserError {
         ParserError(s)
     }
 }
-
-

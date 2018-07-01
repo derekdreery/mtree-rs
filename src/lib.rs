@@ -1,63 +1,108 @@
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
+extern crate smallvec;
+#[macro_use]
+extern crate newtype_array;
 
-use std::io::{self, Read, BufRead};
-use std::path::PathBuf;
+use std::io::{self, Read, BufRead, BufReader, Split};
+use std::path::{Path, PathBuf};
 use std::env;
-use std::str;
+use std::time::Duration;
+use std::os::unix::ffi::OsStrExt;
+use std::ffi::OsStr;
+use smallvec::SmallVec;
 
 mod parser;
 mod util;
 
 pub use parser::{ParserError, MTreeLine, Format, Type};
-use parser::Keyword;
+use parser::{Keyword, SpecialKind};
+pub use util::{Array48, Array64};
 
-pub struct MTree {
-    inner: Box<Iterator<Item=io::Result<Vec<u8>>>>,
-    cwd: Option<PathBuf>,
-    set_params: Params,
+#[cfg(not(unix))]
+compiler_error!("This library currently only supports unix, due to windows using utf-16 for paths");
+
+pub struct MTree<R> where R: Read {
+    /// the iterator over lines (lines are guaranteed to end in \n since we only support unix)
+    inner: Split<BufReader<R>>,
+    /// The current working directory for dir calculations.
+    cwd: PathBuf,
+    /// These are set with the '/set' and '/unset' special functions
+    default_params: Params,
 }
 
-impl MTree {
-    pub fn from_reader(reader: impl Read + 'static) -> MTree {
-        let reader = io::BufReader::new(reader);
+impl<R> MTree<R> where R: Read {
+    /// The constructor function for an MTree instance
+    pub fn from_reader(reader: R) -> MTree<R> {
         MTree {
-            inner: Box::new(reader.split(b'\n')
-                // remove trailing '\r'
-                .map(|line|
-                    line.map(|mut line| {
-                        if ! line.is_empty() && line[line.len()-1] == b'r' {
-                            line.pop();
-                        }
-                        line
-                    })
-                )
-            ),
-            cwd: env::current_dir().ok(),
-            set_params: Params::default(),
+            inner: BufReader::new(reader).split(b'\n'),
+            cwd: env::current_dir().unwrap_or(PathBuf::new()),
+            default_params: Params::default(),
         }
+    }
+
+    /// This is a helper function to make error handling easier.
+    fn next_entry(&mut self, line: io::Result<Vec<u8>>) -> Result<Option<Entry>, Error> {
+        let line = line?;
+        let line = MTreeLine::from_bytes(&line)?;
+        Ok(match line {
+            MTreeLine::Blank | MTreeLine::Comment(_) => None,
+            MTreeLine::Special(SpecialKind::Set, keywords) => {
+                self.default_params.set_list(keywords.into_iter());
+                None
+            },
+            // this won't work because keywords need to be parsed without arguments.
+            MTreeLine::Special(SpecialKind::Unset, _keywords) => unimplemented!(),
+            MTreeLine::Relative(path, keywords) => {
+                let mut params = self.default_params.clone();
+                params.set_list(keywords.into_iter());
+                if self.cwd.file_name().is_none() {
+                    panic!("relative without a current working dir");
+                }
+                Some(Entry {
+                    path: self.cwd.join(OsStr::from_bytes(path)),
+                    params,
+                })
+            },
+            MTreeLine::DotDot => {
+                self.cwd.pop();
+                None
+            },
+            MTreeLine::Full(path, keywords) => {
+                let mut params = self.default_params.clone();
+                params.set_list(keywords.into_iter());
+                Some(Entry {
+                    path: Path::new(OsStr::from_bytes(path)).to_owned(),
+                    params,
+                })
+            },
+        })
     }
 }
 
-impl Iterator for MTree {
-    type Item = io::Result<Entry>;
+impl<R> Iterator for MTree<R> where R: Read {
+    type Item = Result<Entry, Error>;
 
-    fn next(&mut self) -> Option<io::Result<Entry>> {
-        let line = match self.inner.next()? {
-            Ok(line) => line,
-            Err(e) => return Some(Err(e))
-        };
+    fn next(&mut self) -> Option<Result<Entry, Error>> {
+        while let Some(line) = self.inner.next() {
+            match self.next_entry(line) {
+                Ok(Some(entry)) => return Some(Ok(entry)),
+                Ok(None) => (),
+                Err(e) => return Some(Err(e))
+            }
+        }
         None
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Entry {
     pub path: PathBuf,
     pub params: Params,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Params {
     /// `cksum` The checksum of the file using the default algorithm specified by
     /// the cksum(1) utility.
@@ -65,21 +110,23 @@ pub struct Params {
     /// `device` The device number for *block* or *char* file types.
     pub device: Option<Device>,
     /// `contents` The full pathname of a file that holds the contents of this file.
-    pub contents: Option<Vec<u8>>,
+    pub contents: Option<PathBuf>,
     /// `flags` The file flags as a symbolic name.
     pub flags: Option<Vec<u8>>,
     /// `gid` The file group as a numeric value.
     pub gid: Option<u64>,
     /// `gname` The file group as a symbolic name.
-    pub gname: Option<String>,
+    ///
+    /// The name can be up to 32 chars and must match regex `[a-z_][a-z0-9_-]*[$]?`.
+    pub gname: Option<SmallVec<[u8; 32]>>,
     /// `ignore` Ignore any file hierarchy below this line.
     pub ignore: bool,
     /// `inode` The inode number.
     pub inode: Option<u64>,
     /// `link` The target of the symbolic link when type=link.
-    pub link: Option<Vec<u8>>,
+    pub link: Option<PathBuf>,
     /// `md5|md5digest` The MD5 message digest of the file.
-    pub md5: Option<[u8; 16]>,
+    pub md5: Option<u128>,
     /// `mode` The current file's permissions as a numeric (octal) or symbolic value.
     pub mode: Option<Vec<u8>>,
     /// `nlink` The number of hard links the file is expected to have.
@@ -102,59 +149,73 @@ pub struct Params {
     /// `sha256|sha256digest` The FIPS 180-2 ("SHA-256") message digest of the file.
     pub sha256: Option<[u8; 32]>,
     /// `sha384|sha384digest` The FIPS 180-2 ("SHA-384") message digest of the file.
-    pub sha384: Option<[u8; 48]>,
+    pub sha384: Option<Array48<u8>>,
     /// `sha512|sha512digest` The FIPS 180-2 ("SHA-512") message digest of the file.
-    pub sha512: Option<[u8; 64]>,
+    pub sha512: Option<Array64<u8>>,
     /// `size` The size, in bytes, of the file.
     pub size: Option<u64>,
     /// `time` The last modification time of the file
-    pub time: Option<Vec<u8>>,
+    pub time: Option<Duration>,
     /// `type` The type of the file.
     pub file_type: Option<Type>,
     /// The file owner as a numeric value.
     pub uid: Option<u64>,
     /// The file owner as a symbolic name.
-    pub uname: Option<Vec<u8>>,
+    ///
+    /// The name can be up to 32 chars and must match regex `[a-z_][a-z0-9_-]*[$]?`.
+    pub uname: Option<SmallVec<[u8; 32]>>,
 }
 
 impl Params {
-    fn set(&mut self, keywords: impl Iterator<Item=Keyword<'static>>) {
+
+    fn set_list<'a>(&mut self, keywords: impl Iterator<Item=Keyword<'a>>) {
         for keyword in keywords {
-            match keyword {
-                Keyword::Checksum(cksum) => self.checksum = Some(cksum),
-                Keyword::DeviceRef(device) => self.device = Some(device.to_device()),
-                Keyword::Contents(contents) => self.contents = Some(contents.to_owned()),
-                Keyword::Flags(flags) => self.flags = Some(flags.to_owned()),
-                Keyword::Gid(gid) => self.gid = Some(gid),
-                // Should be utf8: see https://unix.stackexchange.com/questions/21013/does-character-ä-in-usernames-cause-bugs-in-linux-systems
-                // Same for user
-                Keyword::Gname(gname) => self.gname = Some(str::from_utf8(gname)
-                                                           .expect("group name to be utf8")
-                                                           .to_owned()),
-                Keyword::Ignore => self.ignore = true,
-                Keyword::Inode(inode) => self.inode = Some(inode),
-                Keyword::Link(link) => self.link = Some(link.to_owned()),
-                Keyword::Md5(md5) => self.md5 = Some(md5),
-                Keyword::Mode(mode) => self.mode = Some(mode.to_owned()),
-                Keyword::NLink(nlink) => self.nlink = Some(nlink),
-                Keyword::NoChange => self.no_change = false,
-                Keyword::Optional => self.optional = false,
-                Keyword::ResidentDeviceRef(device) =>
-                    self.resident_device = Some(device.to_device()),
-                Keyword::Rmd160(rmd160) => self.rmd160 = Some(rmd160),
-                Keyword::Sha1(sha1) => self.sha1 = Some(sha1),
-                Keyword::Sha256(sha256) => self.sha256 = Some(sha256),
-                Keyword::Sha384(sha384) => self.sha384 = Some(sha384),
-                Keyword::Sha512(sha512) => self.sha512 = Some(sha512),
-                Keyword::Size(size) => self.size = Some(size),
-                Keyword::Time(time) => self.time = Some(time.to_owned()),
-                Keyword::Type(ty) => self.file_type = Some(ty),
-                Keyword::Uid(uid) => self.uid = Some(uid),
-                Keyword::Uname(uname) => self.uname = Some(uname.to_owned()),
-            }
+            self.set(keyword);
         }
     }
 
+    /// Set a parameter from a parsed keyword.
+    fn set(&mut self, keyword: Keyword<'_>) {
+        match keyword {
+            Keyword::Checksum(cksum) => self.checksum = Some(cksum),
+            Keyword::DeviceRef(device) => self.device = Some(device.to_device()),
+            Keyword::Contents(contents) =>
+                self.contents = Some(Path::new(OsStr::from_bytes(contents)).to_owned()),
+            Keyword::Flags(flags) => self.flags = Some(flags.to_owned()),
+            Keyword::Gid(gid) => self.gid = Some(gid),
+            Keyword::Gname(gname) => self.gname = Some({
+                let mut vec = SmallVec::new();
+                vec.extend_from_slice(gname);
+                vec
+            }),
+            Keyword::Ignore => self.ignore = true,
+            Keyword::Inode(inode) => self.inode = Some(inode),
+            Keyword::Link(link) => self.link = Some(Path::new(OsStr::from_bytes(link)).to_owned()),
+            Keyword::Md5(md5) => self.md5 = Some(md5),
+            Keyword::Mode(mode) => self.mode = Some(mode.to_owned()),
+            Keyword::NLink(nlink) => self.nlink = Some(nlink),
+            Keyword::NoChange => self.no_change = false,
+            Keyword::Optional => self.optional = false,
+            Keyword::ResidentDeviceRef(device) =>
+                self.resident_device = Some(device.to_device()),
+            Keyword::Rmd160(rmd160) => self.rmd160 = Some(rmd160),
+            Keyword::Sha1(sha1) => self.sha1 = Some(sha1),
+            Keyword::Sha256(sha256) => self.sha256 = Some(sha256),
+            Keyword::Sha384(sha384) => self.sha384 = Some(sha384),
+            Keyword::Sha512(sha512) => self.sha512 = Some(sha512),
+            Keyword::Size(size) => self.size = Some(size),
+            Keyword::Time(time) => self.time = Some(time),
+            Keyword::Type(ty) => self.file_type = Some(ty),
+            Keyword::Uid(uid) => self.uid = Some(uid),
+            Keyword::Uname(uname) => self.uname = Some({
+                let mut vec = SmallVec::new();
+                vec.extend_from_slice(uname);
+                vec
+            }),
+        }
+    }
+
+    /*
     /// Empty this params list (better mem usage than creating a new one).
     fn clear(&mut self) {
         self.checksum = None;
@@ -183,6 +244,7 @@ impl Params {
         self.uid = None;
         self.uname = None;
     }
+    */
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
@@ -203,6 +265,18 @@ pub enum Error {
     Io(#[cause] io::Error),
     #[fail(display="an error occured while parsing the mtree")]
     Parser(#[cause] ParserError),
+}
+
+impl From<io::Error> for Error {
+    fn from(from: io::Error) -> Error {
+        Error::Io(from)
+    }
+}
+
+impl From<parser::ParserError> for Error {
+    fn from(from: parser::ParserError) -> Error {
+        Error::Parser(from)
+    }
 }
 
 #[cfg(test)]
