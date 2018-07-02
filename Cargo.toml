@@ -2,10 +2,13 @@
 name = "mtree"
 version = "0.1.0"
 authors = ["Richard Dodd <richard.o.dodd@gmail.com>"]
+readme = "./README.md"
+description = "A crate for iterating through the entries of an mtree record file."
+categories = ["parsing", "os::unix-apis", "filesystem"]
 
 [dependencies]
 failure = "0.1"
 failure_derive = "0.1"
 smallvec = "0.6"
-log = "0.4"
 newtype_array = "0.1"
+bitflags = "1"

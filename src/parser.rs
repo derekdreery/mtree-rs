@@ -1,6 +1,7 @@
 //! Stuff for parsing mtree files.
-use util::{FromHex, FromDec, parse_time, Array48, Array64};
+use util::{FromHex, FromDec, parse_time, Array48, Array64, from_oct_ch};
 use std::time::Duration;
+use std::fmt;
 
 use super::Device;
 
@@ -114,7 +115,7 @@ pub enum Keyword<'a> {
     /// `md5|md5digest` The MD5 message digest of the file.
     Md5(u128),
     /// `mode` The current file's permissions as a numeric (octal) or symbolic value.
-    Mode(&'a [u8]),
+    Mode(FileMode),
     /// `nlink` The number of hard links the file is expected to have.
     NLink(u64),
     /// `nochange` Make sure this file or directory exists but otherwise ignore
@@ -173,7 +174,7 @@ impl<'a> Keyword<'a> {
             b"link" => Keyword::Link(next("link", iter.next())?),
             b"md5" | b"md5digest"
                 => Keyword::Md5(u128::from_hex(next("md5|md5digest", iter.next())?)?),
-            b"mode" => Keyword::Mode(next("mode", iter.next())?),
+            b"mode" => Keyword::Mode(FileMode::from_bytes(next("mode", iter.next())?)?),
             b"nlink" => Keyword::NLink(u64::from_dec(next("nlink", iter.next())?)?),
             b"nochange" => Keyword::NoChange,
             b"optional" => Keyword::Optional,
@@ -245,6 +246,7 @@ impl<'a> DeviceRef<'a> {
     }
 }
 
+/// The available device formats.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Format {
     Native,
@@ -314,14 +316,25 @@ fn test_format_from_butes() {
     }
 }
 
+/// The type of an entry.
+///
+/// In an mtree file, entries can be files, directories, and some other special unix types like
+/// block/character devices.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {
+    /// A unix block device.
     BlockDevice,
+    /// A unix character device.
     CharacterDevice,
+    /// A directory.
     Directory,
+    /// A unix fifo (named pipe), useful for IPC.
     Fifo,
+    /// A standard file.
     File,
+    /// A symbolic link.
     SymbolicLink,
+    /// A unix socket.
     Socket,
 }
 
@@ -338,6 +351,24 @@ impl Type {
             _ => return Err(format!(r#""{}" is not a valid file type"#,
                                     String::from_utf8_lossy(input)).into()),
         })
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Type::BlockDevice => "block",
+            Type::CharacterDevice => "char",
+            Type::Directory => "dir",
+            Type::Fifo => "fifo",
+            Type::File => "file",
+            Type::SymbolicLink => "link",
+            Type::Socket => "socket",
+        }
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -357,11 +388,94 @@ fn test_type_from_bytes() {
     assert!(Type::from_bytes(&b"other"[..]).is_err());
 }
 
+bitflags! {
+    /// Unix file permissions.
+    pub struct Perms: u8 {
+        /// Entity has read access.
+        const READ = 0b100;
+        /// Entity has write access.
+        const WRITE = 0b010;
+        /// Entity has execute access.
+        const EXECUTE = 0b001;
+    }
+}
+
+impl fmt::Display for Perms {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.contains(Perms::READ) {
+            f.write_str("r")?;
+        } else {
+            f.write_str("-")?;
+        }
+        if self.contains(Perms::WRITE) {
+            f.write_str("w")?;
+        } else {
+            f.write_str("-")?;
+        }
+        if self.contains(Perms::EXECUTE) {
+            f.write_str("x")?;
+        } else {
+            f.write_str("-")?;
+        }
+        Ok(())
+    }
+}
+
+/// The file/dir permissions for owner/group/everyone else.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct FileMode {
+    /// The permissions for the owner of the file.
+    pub owner: Perms,
+    /// The permissions for everyone who is not the owner, but in the group.
+    pub group: Perms,
+    /// The permissions for everyone who is not the owner and not in the group.
+    pub other: Perms
+}
+
+impl FileMode {
+    fn from_bytes(input: &[u8]) -> ParserResult<FileMode> {
+        // file mode can either be symbolic, or octal. For now only support octal
+        #[inline]
+        fn from_bytes_opt(input: &[u8]) -> Option<FileMode> {
+            if input.len() != 3 {
+                return None;
+            }
+            let owner = from_oct_ch(input[0])?;
+            let group = from_oct_ch(input[1])?;
+            let other = from_oct_ch(input[2])?;
+            Some(FileMode {
+                owner: Perms { bits: owner },
+                group: Perms { bits: group },
+                other: Perms { bits: other },
+            })
+        }
+        from_bytes_opt(input).ok_or_else(|| {
+            format!(r#"mode value must be 3 octal chars, found "{}""#,
+                    String::from_utf8_lossy(input)).into()
+        })
+    }
+}
+
+impl fmt::Display for FileMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}{}{}", self.owner, self.group, self.other)
+    }
+}
+
+impl fmt::Octal for FileMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:o}{:o}{:o}", self.owner, self.group, self.other)
+    }
+}
+
 pub(crate) type ParserResult<T> = Result<T, ParserError>;
 
-#[derive(Debug, Eq, PartialEq, Fail)]
+/// An error occurred during parsing a record.
+///
+/// This pretty must just gives an error report at the moment.
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Fail)]
 #[fail(display = "{}", _0)]
-pub struct ParserError(String);
+pub struct ParserError(pub String);
 
 impl From<String> for ParserError {
     fn from(s: String) -> ParserError {

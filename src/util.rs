@@ -156,6 +156,20 @@ fn from_dec_ch(i: u8) -> Option<u8> {
    })
 }
 
+pub fn from_oct_ch(i: u8) -> Option<u8> {
+   Some(match i {
+       b'0' => 0,
+       b'1' => 1,
+       b'2' => 2,
+       b'3' => 3,
+       b'4' => 4,
+       b'5' => 5,
+       b'6' => 6,
+       b'7' => 7,
+       _ => return None,
+   })
+}
+
 pub fn parse_time(input: &[u8]) -> ParserResult<Duration> {
     let error = || -> ParserError {
         format!(r#"couldn't parse time from "{}""#, String::from_utf8_lossy(input)).into()
@@ -169,5 +183,25 @@ pub fn parse_time(input: &[u8]) -> ParserResult<Duration> {
 }
 
 
-newtype_array!(pub struct Array48(48));
-newtype_array!(pub struct Array64(64));
+newtype_array!(pub struct Array48(pub 48));
+newtype_array!(pub struct Array64(pub 64));
+
+/*
+impl<T: fmt::LowerHex> fmt::Display for Array48<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for el in &self[..] {
+            write!(f, "{:x}", el)?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: fmt::LowerHex> fmt::Display for Array64<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for el in &self[..] {
+            write!(f, "{:x}", el)?;
+        }
+        Ok(())
+    }
+}
+*/
