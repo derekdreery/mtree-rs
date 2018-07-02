@@ -29,7 +29,7 @@
      let entry = entry.unwrap();
      // We can print out a human-readable copy of the entry
      println!("{}", entry);
-     // Let's check that if there is a creation time, it's in the past
+     // Let's check that if there is a modification time, it's in the past
      if let Some(time) = entry.params.time {
          assert!(time < SystemTime::now());
      }
