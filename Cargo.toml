@@ -5,6 +5,7 @@ authors = ["Richard Dodd <richard.o.dodd@gmail.com>"]
 readme = "./README.md"
 description = "A crate for iterating through the entries of an mtree record file."
 categories = ["parsing", "os::unix-apis", "filesystem"]
+license = "Apache-2.0/MIT"
 
 [dependencies]
 failure = "0.1"
