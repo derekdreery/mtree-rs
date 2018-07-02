@@ -29,7 +29,7 @@
 //!     let entry = entry.unwrap();
 //!     // We can print out a human-readable copy of the entry
 //!     println!("{}", entry);
-//!     // Let's check that if there is a creation time, it's in the past
+//!     // Let's check that if there is a modification time, it's in the past
 //!     if let Some(time) = entry.params.time {
 //!         assert!(time < SystemTime::now());
 //!     }
@@ -401,7 +401,7 @@ impl fmt::Display for Params {
             writeln!(f, "size: {}", v)?;
         }
         if let Some(v) = self.time {
-            writeln!(f, "creation time: {:?}", v)?;
+            writeln!(f, "modification time: {:?}", v)?;
         }
         if let Some(v) = self.file_type {
             writeln!(f, "file type: {}", v)?;
