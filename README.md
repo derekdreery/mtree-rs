@@ -9,7 +9,7 @@
 
  ```rust
  use mtree::MTree;
- use std::time::{SystemTime, UNIX_EPOCH};
+ use std::time::SystemTime;
 
  // We're going to load data from a string so this example with pass doctest,
  // but there's no reason you can't use a file, or any other data source.
