@@ -472,7 +472,7 @@ pub(crate) type ParserResult<T> = Result<T, ParserError>;
 
 /// An error occurred during parsing a record.
 ///
-/// This pretty must just gives an error report at the moment.
+/// This currently just gives an error report at the moment.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Fail)]
 #[fail(display = "{}", _0)]
 pub struct ParserError(pub String);
