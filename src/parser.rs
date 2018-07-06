@@ -424,6 +424,12 @@ impl fmt::Display for Perms {
 /// The file/dir permissions for owner/group/everyone else.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct FileMode {
+    /// Executable files with this bit set will
+    /// run with effective uid set to the uid of the file owner.
+    pub setuid: bool,
+    /// Executable files with this bit set will
+    /// run with effective gid set to the gid of the file owner.
+    pub setgid: bool,
     /// The permissions for the owner of the file.
     pub owner: Perms,
     /// The permissions for everyone who is not the owner, but in the group.
@@ -436,7 +442,14 @@ impl FileMode {
     fn from_bytes(input: &[u8]) -> ParserResult<FileMode> {
         // file mode can either be symbolic, or octal. For now only support octal
         #[inline]
-        fn from_bytes_opt(input: &[u8]) -> Option<FileMode> {
+        fn from_bytes_opt(mut input: &[u8]) -> Option<FileMode> {
+            let (setuid, setgid) = if input.len() == 4 {
+                let setid = input[0];
+                input = &input[1..];
+                (setid & 0b100 != 0, setid & 0b010 != 0)
+            } else {
+                (false, false)
+            };
             if input.len() != 3 {
                 return None;
             }
@@ -444,6 +457,7 @@ impl FileMode {
             let group = from_oct_ch(input[1])?;
             let other = from_oct_ch(input[2])?;
             Some(FileMode {
+                setuid, setgid,
                 owner: Perms { bits: owner },
                 group: Perms { bits: group },
                 other: Perms { bits: other },
