@@ -183,8 +183,8 @@ pub fn parse_time(input: &[u8]) -> ParserResult<Duration> {
 }
 
 
-newtype_array!(pub struct Array48(pub 48));
-newtype_array!(pub struct Array64(pub 64));
+newtype_array!(pub struct Array48(48));
+newtype_array!(pub struct Array64(64));
 
 /*
 impl<T: fmt::LowerHex> fmt::Display for Array48<T> {
