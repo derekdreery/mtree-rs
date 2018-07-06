@@ -311,6 +311,141 @@ impl Params {
         self.uname = None;
     }
     */
+
+    /// `cksum` The checksum of the file using the default algorithm specified by
+    /// the cksum(1) utility.
+    pub fn checksum(&self) -> Option<u64> {
+        self.checksum
+    }
+
+    /// `device` The device number for *block* or *char* file types.
+    pub fn device(&self) -> Option<&Device> {
+        self.device.as_ref()
+    }
+
+    /// `contents` The full pathname of a file that holds the contents of this file.
+    pub fn contents(&self) -> Option<&Path> {
+        self.contents.as_ref().map(|v| v.as_ref())
+    }
+
+    /// `flags` The file flags as a symbolic name.
+    pub fn flags(&self) -> Option<&[u8]> {
+        self.flags.as_ref().map(|v| v.as_ref())
+    }
+
+    /// `gid` The file group as a numeric value.
+    pub fn gid(&self) -> Option<u64> {
+        self.gid
+    }
+
+    /// `gname` The file group as a symbolic name.
+    ///
+    /// The name can be up to 32 chars and must match regex `[a-z_][a-z0-9_-]*[$]?`.
+    pub fn gname(&self) -> Option<&[u8]> {
+        self.gname.as_ref().map(|v| v.as_ref())
+    }
+
+    /// `ignore` Ignore any file hierarchy below this line.
+    pub fn ignore(&self) -> bool {
+        self.ignore
+    }
+
+    /// `inode` The inode number.
+    pub fn inode(&self) -> Option<u64> {
+        self.inode
+    }
+
+    /// `link` The target of the symbolic link when type=link.
+    pub fn link(&self) -> Option<&Path> {
+        self.link.as_ref().map(|v| v.as_ref())
+    }
+
+    /// `md5|md5digest` The MD5 message digest of the file.
+    pub fn md5(&self) -> Option<u128> {
+        self.md5
+    }
+
+    /// `mode` The current file's permissions as a numeric (octal) or symbolic value.
+    pub fn mode(&self) -> Option<FileMode> {
+        self.mode
+    }
+
+    /// `nlink` The number of hard links the file is expected to have.
+    pub fn nlink(&self) -> Option<u64> {
+        self.nlink
+    }
+
+    /// `nochange` Make sure this file or directory exists but otherwise ignore
+    /// all attributes.
+    pub fn no_change(&self) -> bool {
+        self.no_change
+    }
+
+    /// `optional` The file is optional; do not complain about the file if it is
+    /// not in the file hierarchy.
+    pub fn optional(&self) -> bool {
+        self.optional
+    }
+
+    /// `resdevice` The "resident" device number of the file, e.g. the ID of the
+    /// device that contains the file. Its format is the same as the one for
+    /// `device`.
+    pub fn resident_device(&self) -> Option<&Device> {
+        self.resident_device.as_ref()
+    }
+
+    /// `rmd160|rmd160digest|ripemd160digest` The RIPEMD160 message digest of
+    /// the file.
+    pub fn rmd160(&self) -> Option<&[u8; 20]> {
+        self.rmd160.as_ref()
+    }
+
+    /// `sha1|sha1digest` The FIPS 160-1 ("SHA-1") message digest of the file.
+    pub fn sha1(&self) -> Option<&[u8; 20]> {
+        self.sha1.as_ref()
+    }
+
+    /// `sha256|sha256digest` The FIPS 180-2 ("SHA-256") message digest of the file.
+    pub fn sha256(&self) -> Option<&[u8; 32]> {
+        self.sha256.as_ref()
+    }
+
+    /// `sha384|sha384digest` The FIPS 180-2 ("SHA-384") message digest of the file.
+    pub fn sha384(&self) -> Option<&[u8; 48]> {
+        self.sha384.as_ref().map(|v| v.as_ref())
+    }
+
+    /// `sha512|sha512digest` The FIPS 180-2 ("SHA-512") message digest of the file.
+    pub fn sha512(&self) -> Option<&[u8; 64]> {
+        self.sha512.as_ref().map(|v| v.as_ref())
+    }
+
+    /// `size` The size, in bytes, of the file.
+    pub fn size(&self) -> Option<u64> {
+        self.size
+    }
+
+    /// `time` The last modification time of the file.
+    pub fn time(&self) -> Option<SystemTime> {
+        self.time
+    }
+
+    /// `type` The type of the file.
+    pub fn file_type(&self) -> Option<Type> {
+        self.file_type
+    }
+
+    /// The file owner as a numeric value.
+    pub fn uid(&self) -> Option<u64> {
+        self.uid
+    }
+
+    /// The file owner as a symbolic name.
+    ///
+    /// The name can be up to 32 chars and must match regex `[a-z_][a-z0-9_-]*[$]?`.
+    pub fn uname(&self) -> Option<&[u8]> {
+        self.uname.as_ref().map(|v| v.as_ref())
+    }
 }
 
 impl fmt::Display for Params {
