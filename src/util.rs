@@ -36,6 +36,7 @@ impl_FromDec_uint!(u64);
 macro_rules! impl_FromHex_arr {
     ($size:expr) => {
         impl FromHex for [u8; $size] {
+            #[inline]
             fn from_hex(input: &[u8]) -> ParserResult<Self> {
                 if input.len() != 2 * $size {
                     return Err(format!(r#"input length ({}) must be twice the vec size ({}), but \
@@ -69,6 +70,7 @@ impl_FromHex_arr!(32);
 macro_rules! impl_FromHex_newtype {
     ($type:ty, $size:expr) => {
         impl FromHex for $type {
+            #[inline]
             fn from_hex(input: &[u8]) -> ParserResult<Self> {
                 if input.len() != 2 * $size {
                     return Err(format!(r#"input length ({}) must be twice the vec size ({}), but \
@@ -98,76 +100,55 @@ macro_rules! impl_FromHex_newtype {
 impl_FromHex_newtype!(Array48<u8>, 48);
 impl_FromHex_newtype!(Array64<u8>, 64);
 
-macro_rules! impl_FromHex_uint {
-    ($from:ty) => {
-        impl FromHex for $from {
-            fn from_hex(input: &[u8]) -> ParserResult<Self> {
-                let mut acc: Self = 0;
-                for (idx, i) in input.iter().enumerate() {
-                    let val = from_hex_ch(*i).ok_or_else(|| {
-                        format!(r#"could not parse "{}" as a number, problem at char {}"#,
-                                String::from_utf8_lossy(input),
-                                idx)})?;
-                    acc = acc.checked_mul(16).unwrap().checked_add(val as $from).unwrap();
-                }
-                Ok(acc)
-            }
+
+impl FromHex for u128 {
+    /// Convert hex to u128
+    ///
+    /// # Panics
+    ///
+    /// The input length must be exactly 32.
+    #[inline]
+    fn from_hex(input: &[u8]) -> ParserResult<Self> {
+        if input.len() != 32 {
+            return Err(format!(r#"could not parse "{}" as a number, must be 32 chars"#,
+                        String::from_utf8_lossy(input)).into());
         }
+        let mut acc: Self = 0;
+        for (idx, i) in input.iter().enumerate() {
+            let val = from_hex_ch(*i).ok_or_else(|| {
+                format!(r#"could not parse "{}" as a number, problem at char {}"#,
+                        String::from_utf8_lossy(input),
+                        idx)})?;
+            acc = acc * 16 + val as u128;
+        }
+        Ok(acc)
     }
 }
 
-impl_FromHex_uint!(u128);
-
+#[inline]
 fn from_hex_ch(i: u8) -> Option<u8> {
-   Some(match i {
-       b'0' => 0,
-       b'1' => 1,
-       b'2' => 2,
-       b'3' => 3,
-       b'4' => 4,
-       b'5' => 5,
-       b'6' => 6,
-       b'7' => 7,
-       b'8' => 8,
-       b'9' => 9,
-       b'a' | b'A'  => 10,
-       b'b' | b'B'  => 11,
-       b'c' | b'C'  => 12,
-       b'd' | b'D'  => 13,
-       b'e' | b'E'  => 14,
-       b'f' | b'F'  => 15,
-       _ => return None,
-   })
+   match i {
+       b'0' ..= b'9' => Some(i - b'0'),
+       b'a' ..= b'f' => Some(i - b'a' + 10),
+       b'A' ..= b'F' => Some(i - b'A' + 10),
+       _ => None,
+   }
 }
 
+#[inline]
 fn from_dec_ch(i: u8) -> Option<u8> {
-   Some(match i {
-       b'0' => 0,
-       b'1' => 1,
-       b'2' => 2,
-       b'3' => 3,
-       b'4' => 4,
-       b'5' => 5,
-       b'6' => 6,
-       b'7' => 7,
-       b'8' => 8,
-       b'9' => 9,
-       _ => return None,
-   })
+   match i {
+       b'0' ..= b'9' => Some(i - b'0'),
+       _ => None,
+   }
 }
 
+#[inline]
 pub fn from_oct_ch(i: u8) -> Option<u8> {
-   Some(match i {
-       b'0' => 0,
-       b'1' => 1,
-       b'2' => 2,
-       b'3' => 3,
-       b'4' => 4,
-       b'5' => 5,
-       b'6' => 6,
-       b'7' => 7,
-       _ => return None,
-   })
+   match i {
+       b'0' ..= b'7' => Some(i - b'0'),
+       _ => None,
+   }
 }
 
 pub fn parse_time(input: &[u8]) -> ParserResult<Duration> {
@@ -186,22 +167,3 @@ pub fn parse_time(input: &[u8]) -> ParserResult<Duration> {
 newtype_array!(pub struct Array48(48));
 newtype_array!(pub struct Array64(64));
 
-/*
-impl<T: fmt::LowerHex> fmt::Display for Array48<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for el in &self[..] {
-            write!(f, "{:x}", el)?;
-        }
-        Ok(())
-    }
-}
-
-impl<T: fmt::LowerHex> fmt::Display for Array64<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for el in &self[..] {
-            write!(f, "{:x}", el)?;
-        }
-        Ok(())
-    }
-}
-*/
