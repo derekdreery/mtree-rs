@@ -61,7 +61,7 @@ use smallvec::SmallVec;
 mod parser;
 mod util;
 
-pub use parser::{ParserError, Format, Type, FileMode, Perms};
+pub use parser::{ParserError, Format, FileType, FileMode, Perms};
 use parser::{MTreeLine, Keyword, SpecialKind};
 use util::{Array48, Array64};
 
@@ -289,7 +289,7 @@ impl Entry {
     }
 
     /// `type` The type of the file.
-    pub fn file_type(&self) -> Option<Type> {
+    pub fn file_type(&self) -> Option<FileType> {
         self.params.file_type
     }
 
@@ -365,7 +365,7 @@ struct Params {
     /// `time` The last modification time of the file.
     pub time: Option<SystemTime>,
     /// `type` The type of the file.
-    pub file_type: Option<Type>,
+    pub file_type: Option<FileType>,
     /// The file owner as a numeric value.
     pub uid: Option<u64>,
     /// The file owner as a symbolic name.

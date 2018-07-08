@@ -146,7 +146,7 @@ pub enum Keyword<'a> {
     // include a period character and exactly nine digits after the period.
     Time(Duration),
     /// `type` The type of the file.
-    Type(Type),
+    Type(FileType),
     /// The file owner as a numeric value.
     Uid(u64),
     /// The file owner as a symbolic name.
@@ -193,7 +193,7 @@ impl<'a> Keyword<'a> {
                 Keyword::Sha512(<Array64<u8>>::from_hex(next("sha512|sha512digest", iter.next())?)?),
             b"size" => Keyword::Size(u64::from_dec(next("size", iter.next())?)?),
             b"time" => Keyword::Time(parse_time(next("time", iter.next())?)?),
-            b"type" => Keyword::Type(Type::from_bytes(next("type", iter.next())?)?),
+            b"type" => Keyword::Type(FileType::from_bytes(next("type", iter.next())?)?),
             b"uid" => Keyword::Uid(u64::from_dec(next("uid", iter.next())?)?),
             b"uname" => Keyword::Uname(next("uname", iter.next())?),
             other => return Err(format!(r#""{}" is not a valid parameter key (in "{}")"#,
@@ -321,7 +321,7 @@ fn test_format_from_butes() {
 /// In an mtree file, entries can be files, directories, and some other special unix types like
 /// block/character devices.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Type {
+pub enum FileType {
     /// A unix block device.
     BlockDevice,
     /// A unix character device.
@@ -338,16 +338,16 @@ pub enum Type {
     Socket,
 }
 
-impl Type {
-    fn from_bytes(input: &[u8]) -> ParserResult<Type> {
+impl FileType {
+    fn from_bytes(input: &[u8]) -> ParserResult<FileType> {
         Ok(match input {
-            b"block" => Type::BlockDevice,
-            b"char" => Type::CharacterDevice,
-            b"dir" => Type::Directory,
-            b"fifo" => Type::Fifo,
-            b"file" => Type::File,
-            b"link" => Type::SymbolicLink,
-            b"socket" => Type::Socket,
+            b"block" => FileType::BlockDevice,
+            b"char" => FileType::CharacterDevice,
+            b"dir" => FileType::Directory,
+            b"fifo" => FileType::Fifo,
+            b"file" => FileType::File,
+            b"link" => FileType::SymbolicLink,
+            b"socket" => FileType::Socket,
             _ => return Err(format!(r#""{}" is not a valid file type"#,
                                     String::from_utf8_lossy(input)).into()),
         })
@@ -355,18 +355,18 @@ impl Type {
 
     fn as_str(&self) -> &'static str {
         match self {
-            Type::BlockDevice => "block",
-            Type::CharacterDevice => "char",
-            Type::Directory => "dir",
-            Type::Fifo => "fifo",
-            Type::File => "file",
-            Type::SymbolicLink => "link",
-            Type::Socket => "socket",
+            FileType::BlockDevice => "block",
+            FileType::CharacterDevice => "char",
+            FileType::Directory => "dir",
+            FileType::Fifo => "fifo",
+            FileType::File => "file",
+            FileType::SymbolicLink => "link",
+            FileType::Socket => "socket",
         }
     }
 }
 
-impl fmt::Display for Type {
+impl fmt::Display for FileType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
@@ -375,17 +375,17 @@ impl fmt::Display for Type {
 #[test]
 fn test_type_from_bytes() {
     for (input, res) in vec![
-        (&b"block"[..], Type::BlockDevice),
-        (&b"char"[..], Type::CharacterDevice),
-        (&b"dir"[..], Type::Directory),
-        (&b"fifo"[..], Type::Fifo),
-        (&b"file"[..], Type::File),
-        (&b"link"[..], Type::SymbolicLink),
-        (&b"socket"[..], Type::Socket),
+        (&b"block"[..], FileType::BlockDevice),
+        (&b"char"[..], FileType::CharacterDevice),
+        (&b"dir"[..], FileType::Directory),
+        (&b"fifo"[..], FileType::Fifo),
+        (&b"file"[..], FileType::File),
+        (&b"link"[..], FileType::SymbolicLink),
+        (&b"socket"[..], FileType::Socket),
     ] {
-        assert_eq!(Type::from_bytes(&input[..]), Ok(res));
+        assert_eq!(FileType::from_bytes(&input[..]), Ok(res));
     }
-    assert!(Type::from_bytes(&b"other"[..]).is_err());
+    assert!(FileType::from_bytes(&b"other"[..]).is_err());
 }
 
 bitflags! {
