@@ -1,6 +1,6 @@
 [package]
 name = "mtree"
-version = "0.4.2"
+version = "0.4.3"
 authors = ["Richard Dodd <richard.o.dodd@gmail.com>"]
 readme = "./README.md"
 description = "A crate for iterating through the entries of an mtree record file."
@@ -16,7 +16,7 @@ newtype_array = "0.1"
 bitflags = "1"
 
 [badges]
-travis-ci = { respository = "derekdreery/mtree-rs" }
+travis-ci = { repository = "derekdreery/mtree-rs" }
 is-it-maintained-issue-resolution = { repository = "derekdreery/mtree-rs" }
 is-it-maintained-open-issues = { repository = "derekdreery/mtree-rs" }
 maintenance = { status = "passively-maintained" }
