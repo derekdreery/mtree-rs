@@ -375,7 +375,7 @@ struct Params {
 }
 
 impl Params {
-
+    /// Helper method to set a number of parsed keywords.
     fn set_list<'a>(&mut self, keywords: impl Iterator<Item=Keyword<'a>>) {
         for keyword in keywords {
             self.set(keyword);
@@ -599,14 +599,6 @@ impl From<io::Error> for Error {
 impl From<parser::ParserError> for Error {
     fn from(from: parser::ParserError) -> Error {
         Error::Parser(from)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn smoke() {
-        assert_eq!(2 + 2, 4);
     }
 }
 

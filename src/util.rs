@@ -2,11 +2,15 @@
 use parser::{ParserResult, ParserError};
 use std::time::Duration;
 
+/// Helper to parse a number from a slice of u8 in hexadecimal.
 pub trait FromHex: Sized {
+    /// Parse a number from a slice of u8 in hexadecimal.
     fn from_hex(input: &[u8]) -> ParserResult<Self>;
 }
 
+/// Helper to parse a number from a slice of u8 in decimal.
 pub trait FromDec: Sized {
+    /// Parse a number from a slice of u8 in decimal.
     fn from_dec(input: &[u8]) -> ParserResult<Self>;
 }
 
@@ -137,6 +141,7 @@ impl FromHex for u128 {
     }
 }
 
+/// If possible, quickly convert a character of a hexadecimal number into a u8.
 #[inline]
 fn from_hex_ch(i: u8) -> Option<u8> {
    match i {
@@ -147,6 +152,7 @@ fn from_hex_ch(i: u8) -> Option<u8> {
    }
 }
 
+/// If possible, quickly convert a character of a decimal number into a u8.
 #[inline]
 fn from_dec_ch(i: u8) -> Option<u8> {
    match i {
@@ -155,6 +161,7 @@ fn from_dec_ch(i: u8) -> Option<u8> {
    }
 }
 
+/// If possihble, quickly convert a character of a hexadecimal number into a u8.
 #[inline]
 pub fn from_oct_ch(i: u8) -> Option<u8> {
    match i {
@@ -163,6 +170,7 @@ pub fn from_oct_ch(i: u8) -> Option<u8> {
    }
 }
 
+/// Convert a time of format `<seconds>.<nanos>` into a rust `Duration`.
 pub fn parse_time(input: &[u8]) -> ParserResult<Duration> {
     let error = || -> ParserError {
         format!(r#"couldn't parse time from "{}""#, String::from_utf8_lossy(input)).into()
