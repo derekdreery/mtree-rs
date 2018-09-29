@@ -1,5 +1,7 @@
  A library for iterating through entries of an mtree.
 
+[![Build Status](https://travis-ci.org/derekdreery/mtree-rs.svg?branch=master)](https://travis-ci.org/derekdreery/mtree-rs)
+
  *mtree* is a data format used for describing a sequence of files. Their location is record,
  along with optional extra values like checksums, size, permissions etc.
 
