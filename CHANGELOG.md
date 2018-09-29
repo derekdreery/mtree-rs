@@ -13,3 +13,6 @@
 
  - Removed test that didn't test anyting useful.
 
+## New contributors
+
+ - @lucab
