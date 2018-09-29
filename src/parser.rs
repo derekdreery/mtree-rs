@@ -1,7 +1,7 @@
 //! Stuff for parsing mtree files.
-use util::{FromHex, FromDec, parse_time, Array48, Array64, from_oct_ch};
-use std::time::Duration;
 use std::fmt;
+use std::time::Duration;
+use util::{from_oct_ch, parse_time, Array48, Array64, FromDec, FromHex};
 
 use super::Device;
 
@@ -26,8 +26,9 @@ pub enum MTreeLine<'a> {
 
 impl<'a> MTreeLine<'a> {
     pub fn from_bytes(input: &'a [u8]) -> ParserResult<MTreeLine<'a>> {
-        let mut parts = input.split(|ch| *ch == b' ')
-            .filter(|word| ! word.is_empty());
+        let mut parts = input
+            .split(|ch| *ch == b' ')
+            .filter(|word| !word.is_empty());
         // Blank
         let first = match parts.next() {
             Some(f) => f,
@@ -45,9 +46,11 @@ impl<'a> MTreeLine<'a> {
         let mut params = Vec::new();
         for part in parts {
             let keyword = Keyword::from_bytes(part);
-            debug_assert!(keyword.is_ok(),
-                          "could not parse bytes: {}",
-                          String::from_utf8_lossy(part));
+            debug_assert!(
+                keyword.is_ok(),
+                "could not parse bytes: {}",
+                String::from_utf8_lossy(part)
+            );
             if let Ok(keyword) = keyword {
                 params.push(keyword);
             }
@@ -80,8 +83,12 @@ impl SpecialKind {
         Ok(match input {
             b"set" => SpecialKind::Set,
             b"unset" => SpecialKind::Unset,
-            _ => return Err(format!(r#""{}" is not a special command"#,
-                                    String::from_utf8_lossy(input)).into()),
+            _ => {
+                return Err(format!(
+                    r#""{}" is not a special command"#,
+                    String::from_utf8_lossy(input)
+                ).into())
+            }
         })
     }
 }
@@ -155,9 +162,7 @@ pub enum Keyword<'a> {
 impl<'a> Keyword<'a> {
     /// Parse a keyword with optional value.
     fn from_bytes(input: &'a [u8]) -> ParserResult<Keyword<'a>> {
-        fn next<'a>(field: &'static str, val: Option<&'a [u8]>)
-            -> ParserResult<&'a [u8]>
-        {
+        fn next<'a>(field: &'static str, val: Option<&'a [u8]>) -> ParserResult<&'a [u8]> {
             val.ok_or_else(|| format!(r#""{}" requires a parameter, none found"#, field).into())
         }
         let mut iter = input.splitn(2, |ch| *ch == b'=');
@@ -172,34 +177,46 @@ impl<'a> Keyword<'a> {
             b"ignore" => Keyword::Ignore,
             b"inode" => Keyword::Inode(u64::from_dec(next("inode", iter.next())?)?),
             b"link" => Keyword::Link(next("link", iter.next())?),
-            b"md5" | b"md5digest"
-                => Keyword::Md5(u128::from_hex(next("md5|md5digest", iter.next())?)?),
+            b"md5" | b"md5digest" => {
+                Keyword::Md5(u128::from_hex(next("md5|md5digest", iter.next())?)?)
+            }
             b"mode" => Keyword::Mode(FileMode::from_bytes(next("mode", iter.next())?)?),
             b"nlink" => Keyword::NLink(u64::from_dec(next("nlink", iter.next())?)?),
             b"nochange" => Keyword::NoChange,
             b"optional" => Keyword::Optional,
-            b"resdevice" =>
-                Keyword::ResidentDeviceRef(DeviceRef::from_bytes(next("resdevice", iter.next())?)?),
-            b"rmd160" | b"rmd160digest" | b"ripemd160digest" =>
-                Keyword::Rmd160(<[u8; 20]>::from_hex(
-                        next("rmd160|rmd160digest|ripemd160digest", iter.next())?)?),
-            b"sha1" | b"sha1digest" =>
-                Keyword::Sha1(<[u8; 20]>::from_hex(next("sha1|sha1digest", iter.next())?)?),
-            b"sha256" | b"sha256digest" =>
-                Keyword::Sha256(<[u8; 32]>::from_hex(next("sha256|sha256digest", iter.next())?)?),
-            b"sha384" | b"sha384digest" =>
-                Keyword::Sha384(<Array48<u8>>::from_hex(next("sha384|sha384digest", iter.next())?)?),
-            b"sha512" | b"sha512digest" =>
-                Keyword::Sha512(<Array64<u8>>::from_hex(next("sha512|sha512digest", iter.next())?)?),
+            b"resdevice" => {
+                Keyword::ResidentDeviceRef(DeviceRef::from_bytes(next("resdevice", iter.next())?)?)
+            }
+            b"rmd160" | b"rmd160digest" | b"ripemd160digest" => Keyword::Rmd160(
+                <[u8; 20]>::from_hex(next("rmd160|rmd160digest|ripemd160digest", iter.next())?)?,
+            ),
+            b"sha1" | b"sha1digest" => {
+                Keyword::Sha1(<[u8; 20]>::from_hex(next("sha1|sha1digest", iter.next())?)?)
+            }
+            b"sha256" | b"sha256digest" => Keyword::Sha256(<[u8; 32]>::from_hex(next(
+                "sha256|sha256digest",
+                iter.next(),
+            )?)?),
+            b"sha384" | b"sha384digest" => Keyword::Sha384(<Array48<u8>>::from_hex(next(
+                "sha384|sha384digest",
+                iter.next(),
+            )?)?),
+            b"sha512" | b"sha512digest" => Keyword::Sha512(<Array64<u8>>::from_hex(next(
+                "sha512|sha512digest",
+                iter.next(),
+            )?)?),
             b"size" => Keyword::Size(u64::from_dec(next("size", iter.next())?)?),
             b"time" => Keyword::Time(parse_time(next("time", iter.next())?)?),
             b"type" => Keyword::Type(FileType::from_bytes(next("type", iter.next())?)?),
             b"uid" => Keyword::Uid(u64::from_dec(next("uid", iter.next())?)?),
             b"uname" => Keyword::Uname(next("uname", iter.next())?),
-            other => return Err(format!(r#""{}" is not a valid parameter key (in "{}")"#,
-                                        String::from_utf8_lossy(other),
-                                        String::from_utf8_lossy(input)
-                                       ).into())
+            other => {
+                return Err(format!(
+                    r#""{}" is not a valid parameter key (in "{}")"#,
+                    String::from_utf8_lossy(other),
+                    String::from_utf8_lossy(input)
+                ).into())
+            }
         })
     }
 }
@@ -230,19 +247,31 @@ impl<'a> DeviceRef<'a> {
     fn from_bytes(input: &'a [u8]) -> ParserResult<DeviceRef<'a>> {
         let mut iter = input.splitn(4, |ch| *ch == b',');
         let format = Format::from_bytes(iter.next().ok_or_else(|| {
-            format!(r#"could not read format from device "{}""#, String::from_utf8_lossy(input))
+            format!(
+                r#"could not read format from device "{}""#,
+                String::from_utf8_lossy(input)
+            )
         })?)?;
         let major = iter.next().ok_or_else(|| {
-            format!(r#"could not read major field from device "{}""#,
-                    String::from_utf8_lossy(input))
+            format!(
+                r#"could not read major field from device "{}""#,
+                String::from_utf8_lossy(input)
+            )
         })?;
         let minor = iter.next().ok_or_else(|| {
-            format!(r#"could not read minor field from device "{}""#,
-                    String::from_utf8_lossy(input))
+            format!(
+                r#"could not read minor field from device "{}""#,
+                String::from_utf8_lossy(input)
+            )
         })?;
         // optional, so no '?'
         let subunit = iter.next();
-        Ok(DeviceRef { format, major, minor, subunit })
+        Ok(DeviceRef {
+            format,
+            major,
+            minor,
+            subunit,
+        })
     }
 }
 
@@ -286,8 +315,12 @@ impl Format {
             b"svr3" => Format::Svr3,
             b"svr4" => Format::Svr4,
             b"ultrix" => Format::Ultrix,
-            ref other => return Err(format!(r#""{}" is not a valid format"#,
-                                            String::from_utf8_lossy(other)).into()),
+            ref other => {
+                return Err(format!(
+                    r#""{}" is not a valid format"#,
+                    String::from_utf8_lossy(other)
+                ).into())
+            }
         })
     }
 }
@@ -348,8 +381,12 @@ impl FileType {
             b"file" => FileType::File,
             b"link" => FileType::SymbolicLink,
             b"socket" => FileType::Socket,
-            _ => return Err(format!(r#""{}" is not a valid file type"#,
-                                    String::from_utf8_lossy(input)).into()),
+            _ => {
+                return Err(format!(
+                    r#""{}" is not a valid file type"#,
+                    String::from_utf8_lossy(input)
+                ).into())
+            }
         })
     }
 
@@ -435,7 +472,7 @@ pub struct FileMode {
     /// The permissions for everyone who is not the owner, but in the group.
     pub group: Perms,
     /// The permissions for everyone who is not the owner and not in the group.
-    pub other: Perms
+    pub other: Perms,
 }
 
 impl FileMode {
@@ -457,15 +494,18 @@ impl FileMode {
             let group = from_oct_ch(input[1])?;
             let other = from_oct_ch(input[2])?;
             Some(FileMode {
-                setuid, setgid,
+                setuid,
+                setgid,
                 owner: Perms { bits: owner },
                 group: Perms { bits: group },
                 other: Perms { bits: other },
             })
         }
         from_bytes_opt(input).ok_or_else(|| {
-            format!(r#"mode value must be 3 octal chars, found "{}""#,
-                    String::from_utf8_lossy(input)).into()
+            format!(
+                r#"mode value must be 3 octal chars, found "{}""#,
+                String::from_utf8_lossy(input)
+            ).into()
         })
     }
 }

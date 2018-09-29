@@ -49,20 +49,20 @@ extern crate newtype_array;
 #[macro_use]
 extern crate bitflags;
 
-use std::io::{self, Read, BufRead, BufReader, Split};
-use std::path::{Path, PathBuf};
-use std::env;
-use std::fmt;
-use std::time::{UNIX_EPOCH, SystemTime};
-use std::os::unix::ffi::OsStrExt;
-use std::ffi::OsStr;
 use smallvec::SmallVec;
+use std::env;
+use std::ffi::OsStr;
+use std::fmt;
+use std::io::{self, BufRead, BufReader, Read, Split};
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod parser;
 mod util;
 
-pub use parser::{ParserError, Format, FileType, FileMode, Perms};
-use parser::{MTreeLine, Keyword, SpecialKind};
+pub use parser::{FileMode, FileType, Format, ParserError, Perms};
+use parser::{Keyword, MTreeLine, SpecialKind};
 use util::{Array48, Array64};
 
 #[cfg(not(unix))]
@@ -73,7 +73,10 @@ compiler_error!("This library currently only supports unix, due to windows using
 /// This is the main struct for the lib. Semantically, an mtree file is a sequence of filesystem
 /// records. These are provided as an iterator. Use the `from_reader` function to construct an
 /// instance.
-pub struct MTree<R> where R: Read {
+pub struct MTree<R>
+where
+    R: Read,
+{
     /// The iterator over lines (lines are guaranteed to end in \n since we only support unix).
     inner: Split<BufReader<R>>,
     /// The current working directory for dir calculations.
@@ -82,7 +85,10 @@ pub struct MTree<R> where R: Read {
     default_params: Params,
 }
 
-impl<R> MTree<R> where R: Read {
+impl<R> MTree<R>
+where
+    R: Read,
+{
     /// The constructor function for an MTree instance.
     pub fn from_reader(reader: R) -> MTree<R> {
         MTree {
@@ -101,7 +107,7 @@ impl<R> MTree<R> where R: Read {
             MTreeLine::Special(SpecialKind::Set, keywords) => {
                 self.default_params.set_list(keywords.into_iter());
                 None
-            },
+            }
             // this won't work because keywords need to be parsed without arguments.
             MTreeLine::Special(SpecialKind::Unset, _keywords) => unimplemented!(),
             MTreeLine::Relative(path, keywords) => {
@@ -114,11 +120,11 @@ impl<R> MTree<R> where R: Read {
                     path: self.cwd.join(OsStr::from_bytes(path)),
                     params,
                 })
-            },
+            }
             MTreeLine::DotDot => {
                 self.cwd.pop();
                 None
-            },
+            }
             MTreeLine::Full(path, keywords) => {
                 let mut params = self.default_params.clone();
                 params.set_list(keywords.into_iter());
@@ -126,12 +132,15 @@ impl<R> MTree<R> where R: Read {
                     path: Path::new(OsStr::from_bytes(path)).to_owned(),
                     params,
                 })
-            },
+            }
         })
     }
 }
 
-impl<R> Iterator for MTree<R> where R: Read {
+impl<R> Iterator for MTree<R>
+where
+    R: Read,
+{
     type Item = Result<Entry, Error>;
 
     fn next(&mut self) -> Option<Result<Entry, Error>> {
@@ -139,7 +148,7 @@ impl<R> Iterator for MTree<R> where R: Read {
             match self.next_entry(line) {
                 Ok(Some(entry)) => return Some(Ok(entry)),
                 Ok(None) => (),
-                Err(e) => return Some(Err(e))
+                Err(e) => return Some(Err(e)),
             }
         }
         None
@@ -376,7 +385,7 @@ struct Params {
 
 impl Params {
     /// Helper method to set a number of parsed keywords.
-    fn set_list<'a>(&mut self, keywords: impl Iterator<Item=Keyword<'a>>) {
+    fn set_list<'a>(&mut self, keywords: impl Iterator<Item = Keyword<'a>>) {
         for keyword in keywords {
             self.set(keyword);
         }
@@ -387,15 +396,18 @@ impl Params {
         match keyword {
             Keyword::Checksum(cksum) => self.checksum = Some(cksum),
             Keyword::DeviceRef(device) => self.device = Some(device.to_device()),
-            Keyword::Contents(contents) =>
-                self.contents = Some(Path::new(OsStr::from_bytes(contents)).to_owned()),
+            Keyword::Contents(contents) => {
+                self.contents = Some(Path::new(OsStr::from_bytes(contents)).to_owned())
+            }
             Keyword::Flags(flags) => self.flags = Some(flags.to_owned()),
             Keyword::Gid(gid) => self.gid = Some(gid),
-            Keyword::Gname(gname) => self.gname = Some({
-                let mut vec = SmallVec::new();
-                vec.extend_from_slice(gname);
-                vec
-            }),
+            Keyword::Gname(gname) => {
+                self.gname = Some({
+                    let mut vec = SmallVec::new();
+                    vec.extend_from_slice(gname);
+                    vec
+                })
+            }
             Keyword::Ignore => self.ignore = true,
             Keyword::Inode(inode) => self.inode = Some(inode),
             Keyword::Link(link) => self.link = Some(Path::new(OsStr::from_bytes(link)).to_owned()),
@@ -404,8 +416,7 @@ impl Params {
             Keyword::NLink(nlink) => self.nlink = Some(nlink),
             Keyword::NoChange => self.no_change = false,
             Keyword::Optional => self.optional = false,
-            Keyword::ResidentDeviceRef(device) =>
-                self.resident_device = Some(device.to_device()),
+            Keyword::ResidentDeviceRef(device) => self.resident_device = Some(device.to_device()),
             Keyword::Rmd160(rmd160) => self.rmd160 = Some(rmd160),
             Keyword::Sha1(sha1) => self.sha1 = Some(sha1),
             Keyword::Sha256(sha256) => self.sha256 = Some(sha256),
@@ -415,11 +426,13 @@ impl Params {
             Keyword::Time(time) => self.time = Some(UNIX_EPOCH + time),
             Keyword::Type(ty) => self.file_type = Some(ty),
             Keyword::Uid(uid) => self.uid = Some(uid),
-            Keyword::Uname(uname) => self.uname = Some({
-                let mut vec = SmallVec::new();
-                vec.extend_from_slice(uname);
-                vec
-            }),
+            Keyword::Uname(uname) => {
+                self.uname = Some({
+                    let mut vec = SmallVec::new();
+                    vec.extend_from_slice(uname);
+                    vec
+                })
+            }
         }
     }
 
@@ -454,7 +467,6 @@ impl Params {
     }
     */
 }
-
 
 impl fmt::Display for Params {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -583,10 +595,10 @@ pub struct Device {
 #[derive(Debug, Fail)]
 pub enum Error {
     /// There was an i/o error reading data from the reader.
-    #[fail(display="an i/o error occured while reading the mtree")]
+    #[fail(display = "an i/o error occured while reading the mtree")]
     Io(#[cause] io::Error),
     /// There was a problem parsing the records.
-    #[fail(display="an error occured while parsing the mtree")]
+    #[fail(display = "an error occured while parsing the mtree")]
     Parser(#[cause] ParserError),
 }
 
@@ -601,4 +613,3 @@ impl From<parser::ParserError> for Error {
         Error::Parser(from)
     }
 }
-

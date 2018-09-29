@@ -1,11 +1,11 @@
-extern crate mtree;
 extern crate failure;
+extern crate mtree;
 
+use failure::Fail;
+use mtree::MTree;
 use std::env;
 use std::error::Error;
 use std::fs::File;
-use mtree::MTree;
-use failure::Fail;
 
 fn main() -> Result<(), Box<Error>> {
     let path = env::current_dir()?.join("examples/gedit.mtree");

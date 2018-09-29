@@ -1,8 +1,8 @@
 extern crate mtree;
 
+use mtree::MTree;
 use std::env;
 use std::fs::File;
-use mtree::MTree;
 
 #[test]
 fn run() {
