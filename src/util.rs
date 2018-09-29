@@ -17,15 +17,27 @@ macro_rules! impl_FromDec_uint {
                 let mut acc: Self = 0;
                 for (idx, i) in input.iter().enumerate() {
                     let val = from_dec_ch(*i).ok_or_else(|| {
-                        format!(r#"could not parse "{}" as a number, problem at char {}"#,
-                                String::from_utf8_lossy(input),
-                                idx)})?;
-                    acc = acc.checked_mul(10).unwrap().checked_add(val as $from).unwrap();
+                        format!(
+                            r#"could not parse "{}" as a number, problem at char {}"#,
+                            String::from_utf8_lossy(input),
+                            idx
+                        )
+                    })?;
+                    acc = acc
+                        .checked_mul(10)
+                        .ok_or_else(|| {
+                            ParserError::from("could not parse integer - shift overflow".to_owned())
+                        })?.checked_add(val as $from)
+                        .ok_or_else(|| {
+                            ParserError::from(
+                                "could not parse integer - addition overflow".to_owned(),
+                            )
+                        })?;
                 }
                 Ok(acc)
             }
         }
-    }
+    };
 }
 
 impl_FromDec_uint!(u8);
