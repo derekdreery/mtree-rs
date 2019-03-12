@@ -1,16 +1,15 @@
 [package]
 name = "mtree"
-version = "0.4.3"
+version = "0.5.0"
 authors = ["Richard Dodd <richard.o.dodd@gmail.com>"]
 readme = "./README.md"
 description = "A crate for iterating through the entries of an mtree record file."
 categories = ["parsing", "os::unix-apis", "filesystem"]
 license = "Apache-2.0/MIT"
 repository = "https://github.com/derekdreery/mtree-rs"
+edition = "2018"
 
 [dependencies]
-failure = "0.1"
-failure_derive = "0.1"
 smallvec = "0.6"
 newtype_array = "0.1"
 bitflags = "1"

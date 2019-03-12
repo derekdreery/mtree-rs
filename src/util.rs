@@ -1,5 +1,5 @@
 //! Utility misc stuff
-use parser::{ParserError, ParserResult};
+use crate::parser::{ParserError, ParserResult};
 use std::time::Duration;
 
 /// Helper to parse a number from a slice of u8 in hexadecimal.
@@ -31,7 +31,8 @@ macro_rules! impl_FromDec_uint {
                         .checked_mul(10)
                         .ok_or_else(|| {
                             ParserError::from("could not parse integer - shift overflow".to_owned())
-                        })?.checked_add(val as $from)
+                        })?
+                        .checked_add(val as $from)
                         .ok_or_else(|| {
                             ParserError::from(
                                 "could not parse integer - addition overflow".to_owned(),
@@ -57,11 +58,12 @@ macro_rules! impl_FromHex_arr {
                 if input.len() != 2 * $size {
                     return Err(format!(
                         r#"input length ({}) must be twice the vec size ({}), but \
-                                it is not (in "{}")"#,
+                                                                        it is not (in "{}")"#,
                         input.len(),
                         $size,
                         String::from_utf8_lossy(input)
-                    ).into());
+                    )
+                    .into());
                 }
                 let mut acc = [0; $size];
                 for (idx, chunk) in input.chunks(2).enumerate() {
@@ -99,11 +101,12 @@ macro_rules! impl_FromHex_newtype {
                 if input.len() != 2 * $size {
                     return Err(format!(
                         r#"input length ({}) must be twice the vec size ({}), but \
-                                it is not (in "{}")"#,
+                                                                        it is not (in "{}")"#,
                         input.len(),
                         $size,
                         String::from_utf8_lossy(input)
-                    ).into());
+                    )
+                    .into());
                 }
                 let mut acc = [0; $size];
                 for (idx, chunk) in input.chunks(2).enumerate() {
@@ -144,7 +147,8 @@ impl FromHex for u128 {
             return Err(format!(
                 r#"could not parse "{}" as a number, must be 32 chars"#,
                 String::from_utf8_lossy(input)
-            ).into());
+            )
+            .into());
         }
         let mut acc: Self = 0;
         for (idx, i) in input.iter().enumerate() {
@@ -196,7 +200,8 @@ pub fn parse_time(input: &[u8]) -> ParserResult<Duration> {
         format!(
             r#"couldn't parse time from "{}""#,
             String::from_utf8_lossy(input)
-        ).into()
+        )
+        .into()
     };
     let mut time_iter = input.splitn(2, |ch| *ch == b'.');
     let sec = time_iter.next().ok_or_else(error)?;

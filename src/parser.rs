@@ -1,9 +1,9 @@
 //! Stuff for parsing mtree files.
-use std::fmt;
-use std::time::Duration;
-use util::{from_oct_ch, parse_time, Array48, Array64, FromDec, FromHex};
-
-use super::Device;
+use crate::{
+    util::{from_oct_ch, parse_time, Array48, Array64, FromDec, FromHex},
+    Device,
+};
+use std::{fmt, time::Duration};
 
 /// An mtree file is a sequence of lines, each a semantic unit.
 #[derive(Debug)]
@@ -87,7 +87,8 @@ impl SpecialKind {
                 return Err(format!(
                     r#""{}" is not a special command"#,
                     String::from_utf8_lossy(input)
-                ).into())
+                )
+                .into());
             }
         })
     }
@@ -215,7 +216,8 @@ impl<'a> Keyword<'a> {
                     r#""{}" is not a valid parameter key (in "{}")"#,
                     String::from_utf8_lossy(other),
                     String::from_utf8_lossy(input)
-                ).into())
+                )
+                .into());
             }
         })
     }
@@ -319,7 +321,8 @@ impl Format {
                 return Err(format!(
                     r#""{}" is not a valid format"#,
                     String::from_utf8_lossy(other)
-                ).into())
+                )
+                .into());
             }
         })
     }
@@ -385,7 +388,8 @@ impl FileType {
                 return Err(format!(
                     r#""{}" is not a valid file type"#,
                     String::from_utf8_lossy(input)
-                ).into())
+                )
+                .into());
             }
         })
     }
@@ -425,7 +429,7 @@ fn test_type_from_bytes() {
     assert!(FileType::from_bytes(&b"other"[..]).is_err());
 }
 
-bitflags! {
+bitflags::bitflags! {
     /// Unix file permissions.
     pub struct Perms: u8 {
         /// Entity has read access.
@@ -505,7 +509,8 @@ impl FileMode {
             format!(
                 r#"mode value must be 3 octal chars, found "{}""#,
                 String::from_utf8_lossy(input)
-            ).into()
+            )
+            .into()
         })
     }
 }
@@ -527,8 +532,7 @@ pub(crate) type ParserResult<T> = Result<T, ParserError>;
 /// An error occurred during parsing a record.
 ///
 /// This currently just gives an error report at the moment.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Fail)]
-#[fail(display = "{}", _0)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ParserError(pub String);
 
 impl From<String> for ParserError {
@@ -536,3 +540,11 @@ impl From<String> for ParserError {
         ParserError(s)
     }
 }
+
+impl fmt::Display for ParserError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ParserError {}

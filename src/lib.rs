@@ -40,14 +40,8 @@
 //!
 //! [mtree(5)]: https://www.freebsd.org/cgi/man.cgi?mtree(5)
 
-extern crate failure;
-#[macro_use]
-extern crate failure_derive;
-extern crate smallvec;
 #[macro_use]
 extern crate newtype_array;
-#[macro_use]
-extern crate bitflags;
 
 use smallvec::SmallVec;
 use std::env;
@@ -592,14 +586,30 @@ pub struct Device {
 ///
 /// There are 2 possible ways that this lib can fail - there can be a problem parsing a record, or
 /// there can be a fault in the underlying reader.
-#[derive(Debug, Fail)]
+#[derive(Debug)]
 pub enum Error {
     /// There was an i/o error reading data from the reader.
-    #[fail(display = "an i/o error occured while reading the mtree")]
-    Io(#[cause] io::Error),
+    Io(io::Error),
     /// There was a problem parsing the records.
-    #[fail(display = "an error occured while parsing the mtree")]
-    Parser(#[cause] ParserError),
+    Parser(ParserError),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match self {
+            Error::Io(..) => "an i/o error occured while reading the mtree",
+            Error::Parser(..) => "an error occured while parsing the mtree",
+        })
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Io(err) => Some(err),
+            Error::Parser(err) => Some(err),
+        }
+    }
 }
 
 impl From<io::Error> for Error {
