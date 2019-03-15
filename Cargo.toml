@@ -1,6 +1,6 @@
 [package]
 name = "mtree"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Richard Dodd <richard.o.dodd@gmail.com>"]
 readme = "./README.md"
 description = "A crate for iterating through the entries of an mtree record file."
