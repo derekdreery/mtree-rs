@@ -10,9 +10,9 @@ repository = "https://github.com/derekdreery/mtree-rs"
 edition = "2018"
 
 [dependencies]
-smallvec = "0.6"
+smallvec = "1.13"
 newtype_array = "0.1"
-bitflags = "1"
+bitflags = "2"
 
 [badges]
 travis-ci = { repository = "derekdreery/mtree-rs" }

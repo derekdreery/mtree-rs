@@ -431,6 +431,7 @@ fn test_type_from_bytes() {
 
 bitflags::bitflags! {
     /// Unix file permissions.
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct Perms: u8 {
         /// Entity has read access.
         const READ = 0b100;
@@ -500,9 +501,9 @@ impl FileMode {
             Some(FileMode {
                 setuid,
                 setgid,
-                owner: Perms { bits: owner },
-                group: Perms { bits: group },
-                other: Perms { bits: other },
+                owner: Perms::from_bits(owner)?,
+                group: Perms::from_bits(group)?,
+                other: Perms::from_bits(other)?,
             })
         }
         from_bytes_opt(input).ok_or_else(|| {
