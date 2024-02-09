@@ -87,7 +87,7 @@ where
     pub fn from_reader(reader: R) -> MTree<R> {
         MTree {
             inner: BufReader::new(reader).split(b'\n'),
-            cwd: env::current_dir().unwrap_or(PathBuf::new()),
+            cwd: env::current_dir().unwrap_or_default(),
             default_params: Params::default(),
         }
     }
