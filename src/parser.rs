@@ -317,7 +317,7 @@ impl Format {
             b"svr3" => Format::Svr3,
             b"svr4" => Format::Svr4,
             b"ultrix" => Format::Ultrix,
-            ref other => {
+            other => {
                 return Err(format!(
                     r#""{}" is not a valid format"#,
                     String::from_utf8_lossy(other)
@@ -348,7 +348,7 @@ fn test_format_from_butes() {
         (&b"svr4"[..], Format::Svr4),
         (&b"ultrix"[..], Format::Ultrix),
     ] {
-        assert_eq!(Format::from_bytes(&input[..]), Ok(res));
+        assert_eq!(Format::from_bytes(input), Ok(res));
     }
 }
 
@@ -415,22 +415,21 @@ impl fmt::Display for FileType {
 
 #[test]
 fn test_type_from_bytes() {
-    for (input, res) in vec![
-        (&b"block"[..], FileType::BlockDevice),
+    for (input, res) in [(&b"block"[..], FileType::BlockDevice),
         (&b"char"[..], FileType::CharacterDevice),
         (&b"dir"[..], FileType::Directory),
         (&b"fifo"[..], FileType::Fifo),
         (&b"file"[..], FileType::File),
         (&b"link"[..], FileType::SymbolicLink),
-        (&b"socket"[..], FileType::Socket),
-    ] {
-        assert_eq!(FileType::from_bytes(&input[..]), Ok(res));
+        (&b"socket"[..], FileType::Socket)] {
+        assert_eq!(FileType::from_bytes(input), Ok(res));
     }
     assert!(FileType::from_bytes(&b"other"[..]).is_err());
 }
 
 bitflags::bitflags! {
     /// Unix file permissions.
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct Perms: u8 {
         /// Entity has read access.
         const READ = 0b100;
@@ -500,9 +499,9 @@ impl FileMode {
             Some(FileMode {
                 setuid,
                 setgid,
-                owner: Perms { bits: owner },
-                group: Perms { bits: group },
-                other: Perms { bits: other },
+                owner: Perms::from_bits(owner)?,
+                group: Perms::from_bits(group)?,
+                other: Perms::from_bits(other)?,
             })
         }
         from_bytes_opt(input).ok_or_else(|| {
