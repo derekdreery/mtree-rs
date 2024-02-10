@@ -57,7 +57,7 @@ mod util;
 
 pub use parser::{FileMode, FileType, Format, ParserError, Perms};
 use parser::{Keyword, MTreeLine, SpecialKind};
-use util::{Array48, Array64};
+use util::{decode_escapes_path, Array48, Array64};
 
 #[cfg(not(unix))]
 compiler_error!("This library currently only supports unix, due to windows using utf-16 for paths");
@@ -111,7 +111,8 @@ where
                     panic!("relative without a current working dir");
                 }
                 Some(Entry {
-                    path: self.cwd.join(OsStr::from_bytes(path)),
+                    path: util::decode_escapes_path(self.cwd.join(OsStr::from_bytes(path)))
+                        .ok_or(Error::Parser(ParserError("Failed to decode escapes".into())))?,
                     params,
                 })
             }
@@ -123,7 +124,9 @@ where
                 let mut params = self.default_params.clone();
                 params.set_list(keywords.into_iter());
                 Some(Entry {
-                    path: Path::new(OsStr::from_bytes(path)).to_owned(),
+                    path: util::decode_escapes_path(
+                        Path::new(OsStr::from_bytes(path)).to_owned(),
+                    ).ok_or(Error::Parser(ParserError("Failed to decode escapes".into())))?,
                     params,
                 })
             }
@@ -404,7 +407,9 @@ impl Params {
             }
             Keyword::Ignore => self.ignore = true,
             Keyword::Inode(inode) => self.inode = Some(inode),
-            Keyword::Link(link) => self.link = Some(Path::new(OsStr::from_bytes(link)).to_owned()),
+            Keyword::Link(link) => {
+                self.link = decode_escapes_path(Path::new(OsStr::from_bytes(link)).to_owned())
+            }
             Keyword::Md5(md5) => self.md5 = Some(md5),
             Keyword::Mode(mode) => self.mode = Some(mode),
             Keyword::NLink(nlink) => self.nlink = Some(nlink),

@@ -1,6 +1,6 @@
 //! Utility misc stuff
 use crate::parser::{ParserError, ParserResult};
-use std::time::Duration;
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt, time::Duration};
 
 /// Helper to parse a number from a slice of u8 in hexadecimal.
 pub trait FromHex: Sized {
@@ -185,7 +185,7 @@ fn from_dec_ch(i: u8) -> Option<u8> {
     }
 }
 
-/// If possihble, quickly convert a character of a hexadecimal number into a u8.
+/// If possible, quickly convert a character of a hexadecimal number into a u8.
 #[inline]
 pub fn from_oct_ch(i: u8) -> Option<u8> {
     match i {
@@ -213,3 +213,71 @@ pub fn parse_time(input: &[u8]) -> ParserResult<Duration> {
 
 newtype_array!(pub struct Array48(48));
 newtype_array!(pub struct Array64(64));
+
+/// Spaces and other special characters are escaped, take care of that
+pub fn decode_escapes_path(path: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    let path = path.into_os_string();
+    let mut path = path.into_encoded_bytes();
+    let path = decode_escapes(&mut path)?;
+
+    // OsStr::from_bytes is Unix only. It is unlikely this will be used on Windows,
+    // but provide a slower fallback implementation for that.
+    //
+    // We cannot use `OsStr::from_encoded_bytes_unchecked` safely here, since
+    // it is possible the escape was not valid UTF-8, and we don't convert any
+    // such string into valid WTF-8 (I wouldn't even know where to start).
+    #[cfg(unix)]
+    return Some(OsStr::from_bytes(path).into());
+    #[cfg(not(unix))]
+    return Some(String::from_utf8_lossy(path).into_owned().into());
+}
+
+/// Spaces and other special characters are escaped, take care of that
+pub fn decode_escapes(buf: &mut [u8]) -> Option<&mut [u8]> {
+    let mut read_idx = 0;
+    let mut write_idx = 0;
+    while read_idx < buf.len() {
+        if buf[read_idx] == b'\\' {
+            let ch = (from_oct_ch(buf[read_idx + 1])? << 6)
+                | (from_oct_ch(buf[read_idx + 2])? << 3)
+                | from_oct_ch(buf[read_idx + 3])?;
+            buf[write_idx] = ch;
+            read_idx += 3;
+        } else {
+            buf[write_idx] = buf[read_idx];
+        }
+        read_idx += 1;
+        write_idx += 1;
+    }
+    Some(&mut buf[..write_idx])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_escapes, decode_escapes_path};
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_decode_escapes_path() {
+        assert_eq!(
+            PathBuf::from("test"),
+            decode_escapes_path(PathBuf::from("test")).unwrap()
+        );
+        assert_eq!(
+            PathBuf::from("test test2"),
+            decode_escapes_path(PathBuf::from("test\\040test2")).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_decode_escapes() {
+        assert_eq!(
+            b"test",
+            decode_escapes(b"test".to_owned().as_mut()).unwrap()
+        );
+        assert_eq!(
+            b"test test2",
+            decode_escapes(b"test\\040test2".to_owned().as_mut()).unwrap()
+        );
+    }
+}
