@@ -111,7 +111,7 @@ pub enum Keyword<'a> {
     /// I think this is bsd-specific.
     Flags(&'a [u8]),
     /// `gid` The file group as a numeric value.
-    Gid(u64),
+    Gid(u32),
     /// `gname` The file group as a symbolic name.
     Gname(&'a [u8]),
     /// `ignore` Ignore any file hierarchy below this line.
@@ -156,7 +156,7 @@ pub enum Keyword<'a> {
     /// `type` The type of the file.
     Type(FileType),
     /// The file owner as a numeric value.
-    Uid(u64),
+    Uid(u32),
     /// The file owner as a symbolic name.
     Uname(&'a [u8]),
 }
@@ -173,7 +173,7 @@ impl<'a> Keyword<'a> {
             b"device" => Keyword::DeviceRef(DeviceRef::from_bytes(next("devices", iter.next())?)?),
             b"contents" => Keyword::Contents(next("contents", iter.next())?),
             b"flags" => Keyword::Flags(next("flags", iter.next())?),
-            b"gid" => Keyword::Gid(u64::from_dec(next("gid", iter.next())?)?),
+            b"gid" => Keyword::Gid(u32::from_dec(next("gid", iter.next())?)?),
             b"gname" => Keyword::Gname(next("gname", iter.next())?),
             b"ignore" => Keyword::Ignore,
             b"inode" => Keyword::Inode(u64::from_dec(next("inode", iter.next())?)?),
@@ -209,7 +209,7 @@ impl<'a> Keyword<'a> {
             b"size" => Keyword::Size(u64::from_dec(next("size", iter.next())?)?),
             b"time" => Keyword::Time(parse_time(next("time", iter.next())?)?),
             b"type" => Keyword::Type(FileType::from_bytes(next("type", iter.next())?)?),
-            b"uid" => Keyword::Uid(u64::from_dec(next("uid", iter.next())?)?),
+            b"uid" => Keyword::Uid(u32::from_dec(next("uid", iter.next())?)?),
             b"uname" => Keyword::Uname(next("uname", iter.next())?),
             other => {
                 return Err(format!(

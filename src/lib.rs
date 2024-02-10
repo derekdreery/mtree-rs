@@ -195,7 +195,7 @@ impl Entry {
     }
 
     /// `gid` The file group as a numeric value.
-    pub fn gid(&self) -> Option<u64> {
+    pub fn gid(&self) -> Option<u32> {
         self.params.gid
     }
 
@@ -297,7 +297,7 @@ impl Entry {
     }
 
     /// The file owner as a numeric value.
-    pub fn uid(&self) -> Option<u64> {
+    pub fn uid(&self) -> Option<u32> {
         self.params.uid
     }
 
@@ -325,7 +325,7 @@ struct Params {
     /// `flags` The file flags as a symbolic name.
     pub flags: Option<Vec<u8>>,
     /// `gid` The file group as a numeric value.
-    pub gid: Option<u64>,
+    pub gid: Option<u32>,
     /// `gname` The file group as a symbolic name.
     ///
     /// The name can be up to 32 chars and must match regex `[a-z_][a-z0-9_-]*[$]?`.
@@ -370,7 +370,7 @@ struct Params {
     /// `type` The type of the file.
     pub file_type: Option<FileType>,
     /// The file owner as a numeric value.
-    pub uid: Option<u64>,
+    pub uid: Option<u32>,
     /// The file owner as a symbolic name.
     ///
     /// The name can be up to 32 chars and must match regex `[a-z_][a-z0-9_-]*[$]?`.
