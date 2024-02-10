@@ -481,9 +481,8 @@ impl FileMode {
         }
         Ok(FileMode {
             mode: u32::from_str_radix(
-                std::str::from_utf8(input).map_err(|err| {
-                    ParserError(format!("failed to parse mode value: {err}"))
-                })?,
+                std::str::from_utf8(input)
+                    .map_err(|err| ParserError(format!("failed to parse mode value: {err}")))?,
                 8,
             )
             .map_err(|err| ParserError(format!("failed to parse mode as integer: {err}")))?,
