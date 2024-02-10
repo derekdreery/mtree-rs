@@ -1,6 +1,6 @@
 //! Stuff for parsing mtree files.
 use crate::{
-    util::{from_oct_ch, parse_time, Array48, Array64, FromDec, FromHex},
+    util::{parse_time, Array48, Array64, FromDec, FromHex},
     Device,
 };
 use std::{fmt, time::Duration};
@@ -415,13 +415,15 @@ impl fmt::Display for FileType {
 
 #[test]
 fn test_type_from_bytes() {
-    for (input, res) in [(&b"block"[..], FileType::BlockDevice),
+    for (input, res) in [
+        (&b"block"[..], FileType::BlockDevice),
         (&b"char"[..], FileType::CharacterDevice),
         (&b"dir"[..], FileType::Directory),
         (&b"fifo"[..], FileType::Fifo),
         (&b"file"[..], FileType::File),
         (&b"link"[..], FileType::SymbolicLink),
-        (&b"socket"[..], FileType::Socket)] {
+        (&b"socket"[..], FileType::Socket),
+    ] {
         assert_eq!(FileType::from_bytes(input), Ok(res));
     }
     assert!(FileType::from_bytes(&b"other"[..]).is_err());
@@ -464,65 +466,82 @@ impl fmt::Display for Perms {
 /// The file/dir permissions for owner/group/everyone else.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct FileMode {
-    /// Executable files with this bit set will
-    /// run with effective uid set to the uid of the file owner.
-    pub setuid: bool,
-    /// Executable files with this bit set will
-    /// run with effective gid set to the gid of the file owner.
-    pub setgid: bool,
-    /// The permissions for the owner of the file.
-    pub owner: Perms,
-    /// The permissions for everyone who is not the owner, but in the group.
-    pub group: Perms,
-    /// The permissions for everyone who is not the owner and not in the group.
-    pub other: Perms,
+    mode: u32,
 }
 
 impl FileMode {
     fn from_bytes(input: &[u8]) -> ParserResult<FileMode> {
         // file mode can either be symbolic, or octal. For now only support octal
-        #[inline]
-        fn from_bytes_opt(mut input: &[u8]) -> Option<FileMode> {
-            let (setuid, setgid) = if input.len() == 4 {
-                let setid = input[0];
-                input = &input[1..];
-                (setid & 0b100 != 0, setid & 0b010 != 0)
-            } else {
-                (false, false)
-            };
-            if input.len() != 3 {
-                return None;
-            }
-            let owner = from_oct_ch(input[0])?;
-            let group = from_oct_ch(input[1])?;
-            let other = from_oct_ch(input[2])?;
-            Some(FileMode {
-                setuid,
-                setgid,
-                owner: Perms::from_bits(owner)?,
-                group: Perms::from_bits(group)?,
-                other: Perms::from_bits(other)?,
-            })
-        }
-        from_bytes_opt(input).ok_or_else(|| {
-            format!(
-                r#"mode value must be 3 octal chars, found "{}""#,
+        if input.len() > 4 {
+            return Err(format!(
+                r#"mode value must be 4 or less octal chars, found "{}""#,
                 String::from_utf8_lossy(input)
             )
-            .into()
+            .into());
+        }
+        Ok(FileMode {
+            mode: u32::from_str_radix(
+                std::str::from_utf8(input).map_err(|err| {
+                    ParserError(format!("failed to parse mode value: {err}").into())
+                })?,
+                8,
+            )
+            .map_err(|err| ParserError(format!("failed to parse mode as integer: {err}").into()))?,
         })
+    }
+
+    /// Executable files with this bit set will
+    /// run with effective uid set to the uid of the file owner.
+    pub fn setuid(&self) -> bool {
+        self.mode & 0o4000 != 0
+    }
+
+    /// Executable files with this bit set will
+    /// run with effective gid set to the gid of the file owner.
+    pub fn setgid(&self) -> bool {
+        self.mode & 0o2000 != 0
+    }
+
+    /// Is the sticky bit set?
+    pub fn sticky(&self) -> bool {
+        self.mode & 0o1000 != 0
+    }
+
+    /// The permissions for the owner of the file.
+    pub fn owner(&self) -> Perms {
+        const MASK: u32 = 0o700;
+        Perms::from_bits_truncate(((self.mode & MASK) >> 6) as u8)
+    }
+
+    /// The permissions for everyone who is not the owner, but in the group.
+    pub fn group(&self) -> Perms {
+        const MASK: u32 = 0o070;
+        Perms::from_bits_truncate(((self.mode & MASK) >> 3) as u8)
+    }
+
+    /// The permissions for everyone who is not the owner and not in the group.
+    pub fn other(&self) -> Perms {
+        const MASK: u32 = 0o007;
+        Perms::from_bits_truncate((self.mode & MASK) as u8)
+    }
+}
+
+/// Convert to u32 for compatibility with standard library
+impl From<FileMode> for u32 {
+    fn from(value: FileMode) -> Self {
+        value.mode
     }
 }
 
 impl fmt::Display for FileMode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}{}{}", self.owner, self.group, self.other)
+        write!(f, "{}{}{}", self.owner(), self.group(), self.other())
     }
 }
 
 impl fmt::Octal for FileMode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:o}{:o}{:o}", self.owner, self.group, self.other)
+        write!(f, "{:o}{:o}{:o}", self.owner(), self.group(), self.other())
     }
 }
 
