@@ -265,7 +265,7 @@ impl Entry {
 
     /// `sha1|sha1digest` The FIPS 160-1 ("SHA-1") message digest of the file.
     pub fn sha1(&self) -> Option<&[u8; 20]> {
-        self.params.sha1.as_ref()
+        self.params.sha1.as_ref().map(|v| v.as_ref())
     }
 
     /// `sha256|sha256digest` The FIPS 180-2 ("SHA-256") message digest of the file.
@@ -275,12 +275,12 @@ impl Entry {
 
     /// `sha384|sha384digest` The FIPS 180-2 ("SHA-384") message digest of the file.
     pub fn sha384(&self) -> Option<&[u8; 48]> {
-        self.params.sha384.as_ref()
+        self.params.sha384.as_ref().map(|v| v.as_ref())
     }
 
     /// `sha512|sha512digest` The FIPS 180-2 ("SHA-512") message digest of the file.
     pub fn sha512(&self) -> Option<&[u8; 64]> {
-        self.params.sha512.as_ref()
+        self.params.sha512.as_ref().map(|v| v.as_ref())
     }
 
     /// `size` The size, in bytes, of the file.
@@ -331,7 +331,7 @@ struct Params {
     /// `gname` The file group as a symbolic name.
     ///
     /// The name can be up to 32 chars and must match regex `[a-z_][a-z0-9_-]*[$]?`.
-    pub gname: Option<SmallVec<[u8; 32]>>,
+    pub gname: Option<SmallVec<[u8; 8]>>,
     /// `ignore` Ignore any file hierarchy below this line.
     pub ignore: bool,
     /// `inode` The inode number.
@@ -358,13 +358,13 @@ struct Params {
     /// the file.
     pub rmd160: Option<[u8; 20]>,
     /// `sha1|sha1digest` The FIPS 160-1 ("SHA-1") message digest of the file.
-    pub sha1: Option<[u8; 20]>,
+    pub sha1: Option<Box<[u8; 20]>>,
     /// `sha256|sha256digest` The FIPS 180-2 ("SHA-256") message digest of the file.
     pub sha256: Option<[u8; 32]>,
     /// `sha384|sha384digest` The FIPS 180-2 ("SHA-384") message digest of the file.
-    pub sha384: Option<[u8; 48]>,
+    pub sha384: Option<Box<[u8; 48]>>,
     /// `sha512|sha512digest` The FIPS 180-2 ("SHA-512") message digest of the file.
-    pub sha512: Option<[u8; 64]>,
+    pub sha512: Option<Box<[u8; 64]>>,
     /// `size` The size, in bytes, of the file.
     pub size: Option<u64>,
     /// `time` The last modification time of the file.
@@ -376,7 +376,7 @@ struct Params {
     /// The file owner as a symbolic name.
     ///
     /// The name can be up to 32 chars and must match regex `[a-z_][a-z0-9_-]*[$]?`.
-    pub uname: Option<SmallVec<[u8; 32]>>,
+    pub uname: Option<SmallVec<[u8; 8]>>,
 }
 
 impl Params {
@@ -416,10 +416,10 @@ impl Params {
             Keyword::Optional => self.optional = false,
             Keyword::ResidentDeviceRef(device) => self.resident_device = Some(device.to_device()),
             Keyword::Rmd160(rmd160) => self.rmd160 = Some(rmd160),
-            Keyword::Sha1(sha1) => self.sha1 = Some(sha1),
+            Keyword::Sha1(sha1) => self.sha1 = Some(Box::new(sha1)),
             Keyword::Sha256(sha256) => self.sha256 = Some(sha256),
-            Keyword::Sha384(sha384) => self.sha384 = Some(sha384),
-            Keyword::Sha512(sha512) => self.sha512 = Some(sha512),
+            Keyword::Sha384(sha384) => self.sha384 = Some(Box::new(sha384)),
+            Keyword::Sha512(sha512) => self.sha512 = Some(Box::new(sha512)),
             Keyword::Size(size) => self.size = Some(size),
             Keyword::Time(time) => self.time = Some(UNIX_EPOCH + time),
             Keyword::Type(ty) => self.file_type = Some(ty),
@@ -524,7 +524,7 @@ impl fmt::Display for Params {
         }
         if let Some(ref v) = self.sha1 {
             write!(f, "sha1: ")?;
-            for ch in v {
+            for ch in v.iter() {
                 write!(f, "{:x}", ch)?;
             }
             writeln!(f)?;
@@ -538,14 +538,14 @@ impl fmt::Display for Params {
         }
         if let Some(ref v) = self.sha384 {
             write!(f, "sha384: ")?;
-            for ch in v {
+            for ch in v.iter() {
                 write!(f, "{:x}", ch)?;
             }
             writeln!(f)?;
         }
         if let Some(ref v) = self.sha512 {
             write!(f, "sha512: ")?;
-            for ch in v {
+            for ch in v.iter() {
                 write!(f, "{:x}", ch)?;
             }
             writeln!(f)?;
