@@ -40,9 +40,6 @@
 //!
 //! [mtree(5)]: https://www.freebsd.org/cgi/man.cgi?mtree(5)
 
-#[macro_use]
-extern crate newtype_array;
-
 use smallvec::SmallVec;
 use std::env;
 use std::ffi::OsStr;
@@ -57,7 +54,7 @@ mod util;
 
 pub use parser::{FileMode, FileType, Format, ParserError, Perms};
 use parser::{Keyword, MTreeLine, SpecialKind};
-use util::{decode_escapes_path, Array48, Array64};
+use util::decode_escapes_path;
 
 #[cfg(not(unix))]
 compiler_error!("This library currently only supports unix, due to windows using utf-16 for paths");
@@ -278,12 +275,12 @@ impl Entry {
 
     /// `sha384|sha384digest` The FIPS 180-2 ("SHA-384") message digest of the file.
     pub fn sha384(&self) -> Option<&[u8; 48]> {
-        self.params.sha384.as_ref().map(|v| v.as_ref())
+        self.params.sha384.as_ref()
     }
 
     /// `sha512|sha512digest` The FIPS 180-2 ("SHA-512") message digest of the file.
     pub fn sha512(&self) -> Option<&[u8; 64]> {
-        self.params.sha512.as_ref().map(|v| v.as_ref())
+        self.params.sha512.as_ref()
     }
 
     /// `size` The size, in bytes, of the file.
@@ -365,9 +362,9 @@ struct Params {
     /// `sha256|sha256digest` The FIPS 180-2 ("SHA-256") message digest of the file.
     pub sha256: Option<[u8; 32]>,
     /// `sha384|sha384digest` The FIPS 180-2 ("SHA-384") message digest of the file.
-    pub sha384: Option<Array48<u8>>,
+    pub sha384: Option<[u8; 48]>,
     /// `sha512|sha512digest` The FIPS 180-2 ("SHA-512") message digest of the file.
-    pub sha512: Option<Array64<u8>>,
+    pub sha512: Option<[u8; 64]>,
     /// `size` The size, in bytes, of the file.
     pub size: Option<u64>,
     /// `time` The last modification time of the file.

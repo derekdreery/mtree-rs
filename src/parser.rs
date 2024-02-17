@@ -1,6 +1,6 @@
 //! Stuff for parsing mtree files.
 use crate::{
-    util::{parse_time, Array48, Array64, FromDec, FromHex},
+    util::{parse_time, FromDec, FromHex},
     Device,
 };
 use std::{fmt, time::Duration};
@@ -144,9 +144,9 @@ pub enum Keyword<'a> {
     /// `sha256|sha256digest` The FIPS 180-2 ("SHA-256") message digest of the file.
     Sha256([u8; 32]),
     /// `sha384|sha384digest` The FIPS 180-2 ("SHA-384") message digest of the file.
-    Sha384(Array48<u8>),
+    Sha384([u8; 48]),
     /// `sha512|sha512digest` The FIPS 180-2 ("SHA-512") message digest of the file.
-    Sha512(Array64<u8>),
+    Sha512([u8; 64]),
     /// `size` The size, in bytes, of the file.
     Size(u64),
     /// `time` The last modification time of the file, as a duration since the unix epoch.
@@ -198,11 +198,11 @@ impl<'a> Keyword<'a> {
                 "sha256|sha256digest",
                 iter.next(),
             )?)?),
-            b"sha384" | b"sha384digest" => Keyword::Sha384(<Array48<u8>>::from_hex(next(
+            b"sha384" | b"sha384digest" => Keyword::Sha384(<[u8; 48]>::from_hex(next(
                 "sha384|sha384digest",
                 iter.next(),
             )?)?),
-            b"sha512" | b"sha512digest" => Keyword::Sha512(<Array64<u8>>::from_hex(next(
+            b"sha512" | b"sha512digest" => Keyword::Sha512(<[u8; 64]>::from_hex(next(
                 "sha512|sha512digest",
                 iter.next(),
             )?)?),

@@ -92,48 +92,8 @@ macro_rules! impl_FromHex_arr {
 impl_FromHex_arr!(16);
 impl_FromHex_arr!(20);
 impl_FromHex_arr!(32);
-
-macro_rules! impl_FromHex_newtype {
-    ($type:ty, $size:expr) => {
-        impl FromHex for $type {
-            #[inline]
-            fn from_hex(input: &[u8]) -> ParserResult<Self> {
-                if input.len() != 2 * $size {
-                    return Err(format!(
-                        r#"input length ({}) must be twice the vec size ({}), but \
-                                                                        it is not (in "{}")"#,
-                        input.len(),
-                        $size,
-                        String::from_utf8_lossy(input)
-                    )
-                    .into());
-                }
-                let mut acc = [0; $size];
-                for (idx, chunk) in input.chunks(2).enumerate() {
-                    let high = from_hex_ch(chunk[0]).ok_or_else(|| {
-                        format!(
-                            r#"char at position {} in "{}" is not hex"#,
-                            2 * idx,
-                            String::from_utf8_lossy(input)
-                        )
-                    })?;
-                    let low = from_hex_ch(chunk[1]).ok_or_else(|| {
-                        format!(
-                            r#"char at position {} in "{}" is not hex"#,
-                            2 * idx + 1,
-                            String::from_utf8_lossy(input)
-                        )
-                    })?;
-                    acc[idx] = high * 16 + low;
-                }
-                Ok(acc.into())
-            }
-        }
-    };
-}
-
-impl_FromHex_newtype!(Array48<u8>, 48);
-impl_FromHex_newtype!(Array64<u8>, 64);
+impl_FromHex_arr!(48);
+impl_FromHex_arr!(64);
 
 impl FromHex for u128 {
     /// Convert hex to u128
@@ -210,9 +170,6 @@ pub fn parse_time(input: &[u8]) -> ParserResult<Duration> {
     let nano = u32::from_dec(nano)?;
     Ok(Duration::new(sec, nano))
 }
-
-newtype_array!(pub struct Array48(48));
-newtype_array!(pub struct Array64(64));
 
 /// Spaces and other special characters are escaped, take care of that
 pub fn decode_escapes_path(path: std::path::PathBuf) -> Option<std::path::PathBuf> {
