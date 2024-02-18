@@ -108,9 +108,10 @@ where
                     panic!("relative without a current working dir");
                 }
                 Some(Entry {
-                    path: util::decode_escapes_path(self.cwd.join(OsStr::from_bytes(path))).ok_or(
-                        Error::Parser(ParserError("Failed to decode escapes".into())),
-                    )?,
+                    path: util::decode_escapes_path(self.cwd.join(OsStr::from_bytes(path)))
+                        .ok_or_else(|| {
+                            Error::Parser(ParserError("Failed to decode escapes".into()))
+                        })?,
                     params,
                 })
             }
@@ -123,9 +124,9 @@ where
                 params.set_list(keywords.into_iter());
                 Some(Entry {
                     path: util::decode_escapes_path(Path::new(OsStr::from_bytes(path)).to_owned())
-                        .ok_or(Error::Parser(ParserError(
-                            "Failed to decode escapes".into(),
-                        )))?,
+                        .ok_or_else(|| {
+                            Error::Parser(ParserError("Failed to decode escapes".into()))
+                        })?,
                     params,
                 })
             }
