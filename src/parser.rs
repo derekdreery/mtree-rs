@@ -1,6 +1,6 @@
 //! Stuff for parsing mtree files.
 use crate::{
-    util::{from_oct_ch, parse_time, Array48, Array64, FromDec, FromHex},
+    util::{parse_time, FromDec, FromHex},
     Device,
 };
 use std::{fmt, time::Duration};
@@ -111,7 +111,7 @@ pub enum Keyword<'a> {
     /// I think this is bsd-specific.
     Flags(&'a [u8]),
     /// `gid` The file group as a numeric value.
-    Gid(u64),
+    Gid(u32),
     /// `gname` The file group as a symbolic name.
     Gname(&'a [u8]),
     /// `ignore` Ignore any file hierarchy below this line.
@@ -144,9 +144,9 @@ pub enum Keyword<'a> {
     /// `sha256|sha256digest` The FIPS 180-2 ("SHA-256") message digest of the file.
     Sha256([u8; 32]),
     /// `sha384|sha384digest` The FIPS 180-2 ("SHA-384") message digest of the file.
-    Sha384(Array48<u8>),
+    Sha384([u8; 48]),
     /// `sha512|sha512digest` The FIPS 180-2 ("SHA-512") message digest of the file.
-    Sha512(Array64<u8>),
+    Sha512([u8; 64]),
     /// `size` The size, in bytes, of the file.
     Size(u64),
     /// `time` The last modification time of the file, as a duration since the unix epoch.
@@ -156,7 +156,7 @@ pub enum Keyword<'a> {
     /// `type` The type of the file.
     Type(FileType),
     /// The file owner as a numeric value.
-    Uid(u64),
+    Uid(u32),
     /// The file owner as a symbolic name.
     Uname(&'a [u8]),
 }
@@ -173,7 +173,7 @@ impl<'a> Keyword<'a> {
             b"device" => Keyword::DeviceRef(DeviceRef::from_bytes(next("devices", iter.next())?)?),
             b"contents" => Keyword::Contents(next("contents", iter.next())?),
             b"flags" => Keyword::Flags(next("flags", iter.next())?),
-            b"gid" => Keyword::Gid(u64::from_dec(next("gid", iter.next())?)?),
+            b"gid" => Keyword::Gid(u32::from_dec(next("gid", iter.next())?)?),
             b"gname" => Keyword::Gname(next("gname", iter.next())?),
             b"ignore" => Keyword::Ignore,
             b"inode" => Keyword::Inode(u64::from_dec(next("inode", iter.next())?)?),
@@ -198,18 +198,18 @@ impl<'a> Keyword<'a> {
                 "sha256|sha256digest",
                 iter.next(),
             )?)?),
-            b"sha384" | b"sha384digest" => Keyword::Sha384(<Array48<u8>>::from_hex(next(
+            b"sha384" | b"sha384digest" => Keyword::Sha384(<[u8; 48]>::from_hex(next(
                 "sha384|sha384digest",
                 iter.next(),
             )?)?),
-            b"sha512" | b"sha512digest" => Keyword::Sha512(<Array64<u8>>::from_hex(next(
+            b"sha512" | b"sha512digest" => Keyword::Sha512(<[u8; 64]>::from_hex(next(
                 "sha512|sha512digest",
                 iter.next(),
             )?)?),
             b"size" => Keyword::Size(u64::from_dec(next("size", iter.next())?)?),
             b"time" => Keyword::Time(parse_time(next("time", iter.next())?)?),
             b"type" => Keyword::Type(FileType::from_bytes(next("type", iter.next())?)?),
-            b"uid" => Keyword::Uid(u64::from_dec(next("uid", iter.next())?)?),
+            b"uid" => Keyword::Uid(u32::from_dec(next("uid", iter.next())?)?),
             b"uname" => Keyword::Uname(next("uname", iter.next())?),
             other => {
                 return Err(format!(
@@ -317,7 +317,7 @@ impl Format {
             b"svr3" => Format::Svr3,
             b"svr4" => Format::Svr4,
             b"ultrix" => Format::Ultrix,
-            ref other => {
+            other => {
                 return Err(format!(
                     r#""{}" is not a valid format"#,
                     String::from_utf8_lossy(other)
@@ -348,7 +348,7 @@ fn test_format_from_butes() {
         (&b"svr4"[..], Format::Svr4),
         (&b"ultrix"[..], Format::Ultrix),
     ] {
-        assert_eq!(Format::from_bytes(&input[..]), Ok(res));
+        assert_eq!(Format::from_bytes(input), Ok(res));
     }
 }
 
@@ -415,7 +415,7 @@ impl fmt::Display for FileType {
 
 #[test]
 fn test_type_from_bytes() {
-    for (input, res) in vec![
+    for (input, res) in [
         (&b"block"[..], FileType::BlockDevice),
         (&b"char"[..], FileType::CharacterDevice),
         (&b"dir"[..], FileType::Directory),
@@ -424,13 +424,14 @@ fn test_type_from_bytes() {
         (&b"link"[..], FileType::SymbolicLink),
         (&b"socket"[..], FileType::Socket),
     ] {
-        assert_eq!(FileType::from_bytes(&input[..]), Ok(res));
+        assert_eq!(FileType::from_bytes(input), Ok(res));
     }
     assert!(FileType::from_bytes(&b"other"[..]).is_err());
 }
 
 bitflags::bitflags! {
     /// Unix file permissions.
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct Perms: u8 {
         /// Entity has read access.
         const READ = 0b100;
@@ -465,65 +466,81 @@ impl fmt::Display for Perms {
 /// The file/dir permissions for owner/group/everyone else.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct FileMode {
-    /// Executable files with this bit set will
-    /// run with effective uid set to the uid of the file owner.
-    pub setuid: bool,
-    /// Executable files with this bit set will
-    /// run with effective gid set to the gid of the file owner.
-    pub setgid: bool,
-    /// The permissions for the owner of the file.
-    pub owner: Perms,
-    /// The permissions for everyone who is not the owner, but in the group.
-    pub group: Perms,
-    /// The permissions for everyone who is not the owner and not in the group.
-    pub other: Perms,
+    mode: u32,
 }
 
 impl FileMode {
     fn from_bytes(input: &[u8]) -> ParserResult<FileMode> {
         // file mode can either be symbolic, or octal. For now only support octal
-        #[inline]
-        fn from_bytes_opt(mut input: &[u8]) -> Option<FileMode> {
-            let (setuid, setgid) = if input.len() == 4 {
-                let setid = input[0];
-                input = &input[1..];
-                (setid & 0b100 != 0, setid & 0b010 != 0)
-            } else {
-                (false, false)
-            };
-            if input.len() != 3 {
-                return None;
-            }
-            let owner = from_oct_ch(input[0])?;
-            let group = from_oct_ch(input[1])?;
-            let other = from_oct_ch(input[2])?;
-            Some(FileMode {
-                setuid,
-                setgid,
-                owner: Perms { bits: owner },
-                group: Perms { bits: group },
-                other: Perms { bits: other },
-            })
-        }
-        from_bytes_opt(input).ok_or_else(|| {
-            format!(
-                r#"mode value must be 3 octal chars, found "{}""#,
+        if input.len() > 4 {
+            return Err(format!(
+                r#"mode value must be 4 or less octal chars, found "{}""#,
                 String::from_utf8_lossy(input)
             )
-            .into()
+            .into());
+        }
+        Ok(FileMode {
+            mode: u32::from_str_radix(
+                std::str::from_utf8(input)
+                    .map_err(|err| ParserError(format!("failed to parse mode value: {err}")))?,
+                8,
+            )
+            .map_err(|err| ParserError(format!("failed to parse mode as integer: {err}")))?,
         })
+    }
+
+    /// Executable files with this bit set will
+    /// run with effective uid set to the uid of the file owner.
+    pub fn setuid(&self) -> bool {
+        self.mode & 0o4000 != 0
+    }
+
+    /// Executable files with this bit set will
+    /// run with effective gid set to the gid of the file owner.
+    pub fn setgid(&self) -> bool {
+        self.mode & 0o2000 != 0
+    }
+
+    /// Is the sticky bit set?
+    pub fn sticky(&self) -> bool {
+        self.mode & 0o1000 != 0
+    }
+
+    /// The permissions for the owner of the file.
+    pub fn owner(&self) -> Perms {
+        const MASK: u32 = 0o700;
+        Perms::from_bits_truncate(((self.mode & MASK) >> 6) as u8)
+    }
+
+    /// The permissions for everyone who is not the owner, but in the group.
+    pub fn group(&self) -> Perms {
+        const MASK: u32 = 0o070;
+        Perms::from_bits_truncate(((self.mode & MASK) >> 3) as u8)
+    }
+
+    /// The permissions for everyone who is not the owner and not in the group.
+    pub fn other(&self) -> Perms {
+        const MASK: u32 = 0o007;
+        Perms::from_bits_truncate((self.mode & MASK) as u8)
+    }
+}
+
+/// Convert to u32 for compatibility with standard library
+impl From<FileMode> for u32 {
+    fn from(value: FileMode) -> Self {
+        value.mode
     }
 }
 
 impl fmt::Display for FileMode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}{}{}", self.owner, self.group, self.other)
+        write!(f, "{}{}{}", self.owner(), self.group(), self.other())
     }
 }
 
 impl fmt::Octal for FileMode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:o}{:o}{:o}", self.owner, self.group, self.other)
+        write!(f, "{:o}{:o}{:o}", self.owner(), self.group(), self.other())
     }
 }
 

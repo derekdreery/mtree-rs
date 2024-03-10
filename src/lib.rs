@@ -40,9 +40,6 @@
 //!
 //! [mtree(5)]: https://www.freebsd.org/cgi/man.cgi?mtree(5)
 
-#[macro_use]
-extern crate newtype_array;
-
 use smallvec::SmallVec;
 use std::env;
 use std::ffi::OsStr;
@@ -57,7 +54,7 @@ mod util;
 
 pub use parser::{FileMode, FileType, Format, ParserError, Perms};
 use parser::{Keyword, MTreeLine, SpecialKind};
-use util::{Array48, Array64};
+use util::decode_escapes_path;
 
 #[cfg(not(unix))]
 compiler_error!("This library currently only supports unix, due to windows using utf-16 for paths");
@@ -87,7 +84,7 @@ where
     pub fn from_reader(reader: R) -> MTree<R> {
         MTree {
             inner: BufReader::new(reader).split(b'\n'),
-            cwd: env::current_dir().unwrap_or(PathBuf::new()),
+            cwd: env::current_dir().unwrap_or_default(),
             default_params: Params::default(),
         }
     }
@@ -111,7 +108,10 @@ where
                     panic!("relative without a current working dir");
                 }
                 Some(Entry {
-                    path: self.cwd.join(OsStr::from_bytes(path)),
+                    path: util::decode_escapes_path(self.cwd.join(OsStr::from_bytes(path)))
+                        .ok_or_else(|| {
+                            Error::Parser(ParserError("Failed to decode escapes".into()))
+                        })?,
                     params,
                 })
             }
@@ -123,7 +123,10 @@ where
                 let mut params = self.default_params.clone();
                 params.set_list(keywords.into_iter());
                 Some(Entry {
-                    path: Path::new(OsStr::from_bytes(path)).to_owned(),
+                    path: util::decode_escapes_path(Path::new(OsStr::from_bytes(path)).to_owned())
+                        .ok_or_else(|| {
+                            Error::Parser(ParserError("Failed to decode escapes".into()))
+                        })?,
                     params,
                 })
             }
@@ -195,7 +198,7 @@ impl Entry {
     }
 
     /// `gid` The file group as a numeric value.
-    pub fn gid(&self) -> Option<u64> {
+    pub fn gid(&self) -> Option<u32> {
         self.params.gid
     }
 
@@ -263,7 +266,7 @@ impl Entry {
 
     /// `sha1|sha1digest` The FIPS 160-1 ("SHA-1") message digest of the file.
     pub fn sha1(&self) -> Option<&[u8; 20]> {
-        self.params.sha1.as_ref()
+        self.params.sha1.as_ref().map(|v| v.as_ref())
     }
 
     /// `sha256|sha256digest` The FIPS 180-2 ("SHA-256") message digest of the file.
@@ -297,7 +300,7 @@ impl Entry {
     }
 
     /// The file owner as a numeric value.
-    pub fn uid(&self) -> Option<u64> {
+    pub fn uid(&self) -> Option<u32> {
         self.params.uid
     }
 
@@ -325,11 +328,11 @@ struct Params {
     /// `flags` The file flags as a symbolic name.
     pub flags: Option<Vec<u8>>,
     /// `gid` The file group as a numeric value.
-    pub gid: Option<u64>,
+    pub gid: Option<u32>,
     /// `gname` The file group as a symbolic name.
     ///
     /// The name can be up to 32 chars and must match regex `[a-z_][a-z0-9_-]*[$]?`.
-    pub gname: Option<SmallVec<[u8; 32]>>,
+    pub gname: Option<SmallVec<[u8; 8]>>,
     /// `ignore` Ignore any file hierarchy below this line.
     pub ignore: bool,
     /// `inode` The inode number.
@@ -356,13 +359,13 @@ struct Params {
     /// the file.
     pub rmd160: Option<[u8; 20]>,
     /// `sha1|sha1digest` The FIPS 160-1 ("SHA-1") message digest of the file.
-    pub sha1: Option<[u8; 20]>,
+    pub sha1: Option<Box<[u8; 20]>>,
     /// `sha256|sha256digest` The FIPS 180-2 ("SHA-256") message digest of the file.
     pub sha256: Option<[u8; 32]>,
     /// `sha384|sha384digest` The FIPS 180-2 ("SHA-384") message digest of the file.
-    pub sha384: Option<Array48<u8>>,
+    pub sha384: Option<Box<[u8; 48]>>,
     /// `sha512|sha512digest` The FIPS 180-2 ("SHA-512") message digest of the file.
-    pub sha512: Option<Array64<u8>>,
+    pub sha512: Option<Box<[u8; 64]>>,
     /// `size` The size, in bytes, of the file.
     pub size: Option<u64>,
     /// `time` The last modification time of the file.
@@ -370,11 +373,11 @@ struct Params {
     /// `type` The type of the file.
     pub file_type: Option<FileType>,
     /// The file owner as a numeric value.
-    pub uid: Option<u64>,
+    pub uid: Option<u32>,
     /// The file owner as a symbolic name.
     ///
     /// The name can be up to 32 chars and must match regex `[a-z_][a-z0-9_-]*[$]?`.
-    pub uname: Option<SmallVec<[u8; 32]>>,
+    pub uname: Option<SmallVec<[u8; 8]>>,
 }
 
 impl Params {
@@ -404,7 +407,9 @@ impl Params {
             }
             Keyword::Ignore => self.ignore = true,
             Keyword::Inode(inode) => self.inode = Some(inode),
-            Keyword::Link(link) => self.link = Some(Path::new(OsStr::from_bytes(link)).to_owned()),
+            Keyword::Link(link) => {
+                self.link = decode_escapes_path(Path::new(OsStr::from_bytes(link)).to_owned())
+            }
             Keyword::Md5(md5) => self.md5 = Some(md5),
             Keyword::Mode(mode) => self.mode = Some(mode),
             Keyword::NLink(nlink) => self.nlink = Some(nlink),
@@ -412,10 +417,10 @@ impl Params {
             Keyword::Optional => self.optional = false,
             Keyword::ResidentDeviceRef(device) => self.resident_device = Some(device.to_device()),
             Keyword::Rmd160(rmd160) => self.rmd160 = Some(rmd160),
-            Keyword::Sha1(sha1) => self.sha1 = Some(sha1),
+            Keyword::Sha1(sha1) => self.sha1 = Some(Box::new(sha1)),
             Keyword::Sha256(sha256) => self.sha256 = Some(sha256),
-            Keyword::Sha384(sha384) => self.sha384 = Some(sha384),
-            Keyword::Sha512(sha512) => self.sha512 = Some(sha512),
+            Keyword::Sha384(sha384) => self.sha384 = Some(Box::new(sha384)),
+            Keyword::Sha512(sha512) => self.sha512 = Some(Box::new(sha512)),
             Keyword::Size(size) => self.size = Some(size),
             Keyword::Time(time) => self.time = Some(UNIX_EPOCH + time),
             Keyword::Type(ty) => self.file_type = Some(ty),
@@ -520,7 +525,7 @@ impl fmt::Display for Params {
         }
         if let Some(ref v) = self.sha1 {
             write!(f, "sha1: ")?;
-            for ch in v {
+            for ch in v.iter() {
                 write!(f, "{:x}", ch)?;
             }
             writeln!(f)?;
@@ -534,14 +539,14 @@ impl fmt::Display for Params {
         }
         if let Some(ref v) = self.sha384 {
             write!(f, "sha384: ")?;
-            for ch in v {
+            for ch in v.iter() {
                 write!(f, "{:x}", ch)?;
             }
             writeln!(f)?;
         }
         if let Some(ref v) = self.sha512 {
             write!(f, "sha512: ")?;
-            for ch in v {
+            for ch in v.iter() {
                 write!(f, "{:x}", ch)?;
             }
             writeln!(f)?;

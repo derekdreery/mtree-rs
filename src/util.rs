@@ -1,6 +1,6 @@
 //! Utility misc stuff
 use crate::parser::{ParserError, ParserResult};
-use std::time::Duration;
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt, time::Duration};
 
 /// Helper to parse a number from a slice of u8 in hexadecimal.
 pub trait FromHex: Sized {
@@ -55,35 +55,11 @@ macro_rules! impl_FromHex_arr {
         impl FromHex for [u8; $size] {
             #[inline]
             fn from_hex(input: &[u8]) -> ParserResult<Self> {
-                if input.len() != 2 * $size {
-                    return Err(format!(
-                        r#"input length ({}) must be twice the vec size ({}), but \
-                                                                        it is not (in "{}")"#,
-                        input.len(),
-                        $size,
-                        String::from_utf8_lossy(input)
-                    )
-                    .into());
+                let mut result = [0; $size];
+                match faster_hex::hex_decode(input, &mut result) {
+                    Ok(_) => Ok(result),
+                    Err(err) => Err(map_faster_hex_err(input, err)),
                 }
-                let mut acc = [0; $size];
-                for (idx, chunk) in input.chunks(2).enumerate() {
-                    let high = from_hex_ch(chunk[0]).ok_or_else(|| {
-                        format!(
-                            r#"char at position {} in "{}" is not hex"#,
-                            2 * idx,
-                            String::from_utf8_lossy(input)
-                        )
-                    })?;
-                    let low = from_hex_ch(chunk[1]).ok_or_else(|| {
-                        format!(
-                            r#"char at position {} in "{}" is not hex"#,
-                            2 * idx + 1,
-                            String::from_utf8_lossy(input)
-                        )
-                    })?;
-                    acc[idx] = high * 16 + low;
-                }
-                Ok(acc)
             }
         }
     };
@@ -92,48 +68,26 @@ macro_rules! impl_FromHex_arr {
 impl_FromHex_arr!(16);
 impl_FromHex_arr!(20);
 impl_FromHex_arr!(32);
+impl_FromHex_arr!(48);
+impl_FromHex_arr!(64);
 
-macro_rules! impl_FromHex_newtype {
-    ($type:ty, $size:expr) => {
-        impl FromHex for $type {
-            #[inline]
-            fn from_hex(input: &[u8]) -> ParserResult<Self> {
-                if input.len() != 2 * $size {
-                    return Err(format!(
-                        r#"input length ({}) must be twice the vec size ({}), but \
-                                                                        it is not (in "{}")"#,
-                        input.len(),
-                        $size,
-                        String::from_utf8_lossy(input)
-                    )
-                    .into());
-                }
-                let mut acc = [0; $size];
-                for (idx, chunk) in input.chunks(2).enumerate() {
-                    let high = from_hex_ch(chunk[0]).ok_or_else(|| {
-                        format!(
-                            r#"char at position {} in "{}" is not hex"#,
-                            2 * idx,
-                            String::from_utf8_lossy(input)
-                        )
-                    })?;
-                    let low = from_hex_ch(chunk[1]).ok_or_else(|| {
-                        format!(
-                            r#"char at position {} in "{}" is not hex"#,
-                            2 * idx + 1,
-                            String::from_utf8_lossy(input)
-                        )
-                    })?;
-                    acc[idx] = high * 16 + low;
-                }
-                Ok(acc.into())
-            }
-        }
-    };
+#[cold]
+fn map_faster_hex_err(input: &[u8], err: faster_hex::Error) -> ParserError {
+    match err {
+        faster_hex::Error::InvalidChar => format!(
+            r#"input "{}" is not a valid hex string"#,
+            String::from_utf8_lossy(input)
+        )
+        .into(),
+        faster_hex::Error::InvalidLength(len) => format!(
+            r#"input length ({}) must be twice the vec size, but it is not (in "{}")"#,
+            len,
+            String::from_utf8_lossy(input)
+        )
+        .into(),
+        faster_hex::Error::Overflow => "Overflow on processing input".to_owned().into(),
+    }
 }
-
-impl_FromHex_newtype!(Array48<u8>, 48);
-impl_FromHex_newtype!(Array64<u8>, 64);
 
 impl FromHex for u128 {
     /// Convert hex to u128
@@ -143,36 +97,9 @@ impl FromHex for u128 {
     /// The input length must be exactly 32.
     #[inline]
     fn from_hex(input: &[u8]) -> ParserResult<Self> {
-        if input.len() != 32 {
-            return Err(format!(
-                r#"could not parse "{}" as a number, must be 32 chars"#,
-                String::from_utf8_lossy(input)
-            )
-            .into());
-        }
-        let mut acc: Self = 0;
-        for (idx, i) in input.iter().enumerate() {
-            let val = from_hex_ch(*i).ok_or_else(|| {
-                format!(
-                    r#"could not parse "{}" as a number, problem at char {}"#,
-                    String::from_utf8_lossy(input),
-                    idx
-                )
-            })?;
-            acc = acc * 16 + val as u128;
-        }
-        Ok(acc)
-    }
-}
-
-/// If possible, quickly convert a character of a hexadecimal number into a u8.
-#[inline]
-fn from_hex_ch(i: u8) -> Option<u8> {
-    match i {
-        b'0'..=b'9' => Some(i - b'0'),
-        b'a'..=b'f' => Some(i - b'a' + 10),
-        b'A'..=b'F' => Some(i - b'A' + 10),
-        _ => None,
+        let mut dst = [0; 16];
+        faster_hex::hex_decode(input, &mut dst).map_err(|e| map_faster_hex_err(input, e))?;
+        Ok(u128::from_be_bytes(dst))
     }
 }
 
@@ -185,7 +112,7 @@ fn from_dec_ch(i: u8) -> Option<u8> {
     }
 }
 
-/// If possihble, quickly convert a character of a hexadecimal number into a u8.
+/// If possible, quickly convert a character of a hexadecimal number into a u8.
 #[inline]
 pub fn from_oct_ch(i: u8) -> Option<u8> {
     match i {
@@ -211,5 +138,96 @@ pub fn parse_time(input: &[u8]) -> ParserResult<Duration> {
     Ok(Duration::new(sec, nano))
 }
 
-newtype_array!(pub struct Array48(48));
-newtype_array!(pub struct Array64(64));
+/// Spaces and other special characters are escaped, take care of that
+pub fn decode_escapes_path(path: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    let path = path.into_os_string();
+    let mut path = path.into_encoded_bytes();
+    let path = decode_escapes(&mut path)?;
+
+    // OsStr::from_bytes is Unix only. It is unlikely this will be used on Windows,
+    // but provide a slower fallback implementation for that.
+    //
+    // We cannot use `OsStr::from_encoded_bytes_unchecked` safely here, since
+    // it is possible the escape was not valid UTF-8, and we don't convert any
+    // such string into valid WTF-8 (I wouldn't even know where to start).
+    #[cfg(unix)]
+    return Some(OsStr::from_bytes(path).into());
+    #[cfg(not(unix))]
+    return Some(String::from_utf8_lossy(path).into_owned().into());
+}
+
+/// Spaces and other special characters are escaped, take care of that
+pub fn decode_escapes(buf: &mut [u8]) -> Option<&mut [u8]> {
+    let mut read_idx = 0;
+    let mut write_idx = 0;
+    while read_idx < buf.len() {
+        if buf[read_idx] == b'\\' {
+            let ch = (from_oct_ch(buf[read_idx + 1])? << 6)
+                | (from_oct_ch(buf[read_idx + 2])? << 3)
+                | from_oct_ch(buf[read_idx + 3])?;
+            buf[write_idx] = ch;
+            read_idx += 3;
+        } else {
+            buf[write_idx] = buf[read_idx];
+        }
+        read_idx += 1;
+        write_idx += 1;
+    }
+    Some(&mut buf[..write_idx])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_escapes, decode_escapes_path, FromHex};
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_decode_escapes_path() {
+        assert_eq!(
+            PathBuf::from("test"),
+            decode_escapes_path(PathBuf::from("test")).unwrap()
+        );
+        assert_eq!(
+            PathBuf::from("test test2"),
+            decode_escapes_path(PathBuf::from("test\\040test2")).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_decode_escapes() {
+        assert_eq!(
+            b"test",
+            decode_escapes(b"test".to_owned().as_mut()).unwrap()
+        );
+        assert_eq!(
+            b"test test2",
+            decode_escapes(b"test\\040test2".to_owned().as_mut()).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_hex_decode_u128() {
+        assert_eq!(
+            0x112233445566778899aabbccddeeff00,
+            u128::from_hex(b"112233445566778899aabbccddeeff00").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_hex_decode_array_64() {
+        let expected: [u8; 64] = [
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+            0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
+            0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa,
+            0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+            0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
+        ];
+        assert_eq!(
+            expected,
+            <[u8; 64]>::from_hex(
+                b"112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00"
+            )
+            .unwrap()
+        );
+    }
+}
