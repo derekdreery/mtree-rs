@@ -12,6 +12,7 @@ edition = "2021"
 [dependencies]
 smallvec = "1.13"
 bitflags = "2"
+faster-hex = { version = "0.9.0", default-features = false }
 
 [badges]
 travis-ci = { repository = "derekdreery/mtree-rs" }
